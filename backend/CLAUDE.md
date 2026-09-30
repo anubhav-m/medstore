@@ -14,10 +14,12 @@ backend/
 └── src/
     ├── app.js                # builds the Express app — no listen()
     ├── server.js             # connects DB, starts server + jobs, graceful shutdown
-    ├── config/               # env.js (Zod-validated, fails fast), db.js, logger.js
+    ├── config/               # env.js (Zod-validated, fails fast), db.js, logger.js,
+    │                         # rateLimits.js (the only place rate-limit numbers live)
     ├── middleware/           # authCustomer, authAdmin, requireOnboarded, requireRole, validate,
-    │                         # rateLimit, requestId, notFound, errorHandler
+    │                         # rateLimit, requestId, requestLogger, notFound, errorHandler
     ├── modules/
+    │   ├── health/           # GET /health (mounted at the root, not under /api/v1)
     │   ├── auth/             # customer: register, verify email, login, Google, reset, refresh, logout
     │   ├── admin-auth/       # admin: login, refresh, logout, change password, me, push tokens
     │   ├── admins/           # admin model + service (used by admin-auth and scripts)
@@ -32,7 +34,10 @@ backend/
     ├── jobs/                 # expireUnconfirmedBills.js, deleteUnusedUploads.js
     ├── routes/               # customer.routes.js (/api/v1), admin.routes.js (/api/v1/admin)
     └── utils/                # AppError, sendSuccess, pagination, time (IST), money, escapeRegex
+test/                         # mirrors src/; globalSetup.js (memory replica set), setup.js
 ```
+
+Folders and files are created by the feature that first needs them — no empty modules, routers or middleware.
 
 A module that serves both apps keeps one service and splits the HTTP layer:
 
@@ -65,16 +70,22 @@ Route → auth / role / validate middleware → Controller → Service → Model
 There is exactly **one** place that turns errors into HTTP responses: `middleware/errorHandler.js`, registered **last**.
 
 ```js
-// app.js (order matters)
-app.use(requestId);
+// app.js — createApp({ rateLimits }) (order matters)
+app.disable("x-powered-by");
+app.set("trust proxy", env.TRUST_PROXY);
+app.use(requestId);                          // always generated; incoming X-Request-Id ignored
 app.use(helmet());
 app.use(requestLogger);
+app.use(createRateLimit(rateLimits.global)); // before body parsing, so bad bodies are still counted
 app.use(express.json({ limit: "100kb" }));
-app.use("/api/v1/admin", adminRoutes);
-app.use("/api/v1", customerRoutes);
-app.use(notFound);      // throws AppError 404 ROUTE_NOT_FOUND
+app.use(healthRoutes);
+app.use("/api/v1/admin", adminRoutes);       // added by the admin features
+app.use("/api/v1", customerRoutes);          // added by the customer features
+app.use(notFound);      // AppError 404 ROUTE_NOT_FOUND
 app.use(errorHandler);  // always last
 ```
+
+Rate limiters are built with `createRateLimit({ windowMs, limit })` from `middleware/rateLimit.js`; its handler forwards `AppError` 429 `TOO_MANY_REQUESTS` to the error handler. Numbers come from `config/rateLimits.js`.
 
 **Known errors are thrown as `AppError`** with a message, status and a code imported from `@medstore/shared`:
 
@@ -110,6 +121,8 @@ export const confirmBill = async (req, res, next) => {
 | Rate limit exceeded                        | 429     | `TOO_MANY_REQUESTS`                                    |
 | Mongo connection / server-selection errors | 503     | `SERVICE_UNAVAILABLE`                                  |
 | **Anything else**                          | 500     | `INTERNAL_SERVER_ERROR` (generic message)              |
+
+JWT errors (`TokenExpiredError`, `JsonWebTokenError`, `NotBeforeError`) and Mongo connection errors (`MongooseServerSelectionError`, `MongoServerSelectionError`, `MongoNetworkError`, `MongoNetworkTimeoutError`, `MongoNotConnectedError`) are matched by `error.name`, so the classifier doesn't import `jsonwebtoken` or `mongodb`. Mongoose validation cast failures get the message "Invalid value" so rejected values are never echoed. 4xx errors are logged with only their code and error name (messages can echo input); 5xx errors are logged in full.
 
 **Domain codes** (thrown as `AppError`; all defined in `@medstore/shared`):
 
@@ -360,13 +373,16 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 
 - `helmet()`, `x-powered-by` disabled, 100 kb body limit (no files pass through the API), rate limiting.
 - **CORS**: native apps are not subject to CORS, so no CORS middleware is installed. If a web client is added later, add an allow-list from a new env var — never bare `cors()`.
-- Pino + `pino-http` with a request id on every line. Request logs record method, **route pattern** (e.g. `/api/v1/admin/orders`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, codes, phone, address, patient name, notes and bill items. No `console.*`.
+- Pino + `pino-http` (`quietReqLogger`/`quietResLogger`, so `req.log` is bound to `reqId` only) with a request id on every line. Request logs record method, **route pattern** (`req.baseUrl + req.route.path`, or `unmatched`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, codes, phone, address, patient name, notes and bill items (top level and up to two levels deep). `code` is redacted **only** under `req.body` / `body` (OTP codes) — elsewhere it carries error codes that logs must keep. No `console.*`.
 - `GET /health` reports process + DB readiness as `{ status, db }` — no versions, hostnames or error details.
 - Graceful shutdown on `SIGTERM`/`SIGINT`: stop accepting connections, clear jobs, finish in-flight requests, close Mongo, exit (with a hard timeout). Windows has no `SIGTERM` — test shutdown locally with Ctrl+C (`SIGINT`); `node --watch` restarts without running the handler.
 
 ## 12. Testing
 
-- Vitest + Supertest + `mongodb-memory-server` (replica-set mode). The first run downloads a `mongod` binary (slow on Windows with antivirus) — set a generous `hookTimeout`.
+- Vitest + Supertest + `mongodb-memory-server` (replica-set mode). The first run downloads a `mongod` binary (slow on Windows with antivirus) — `hookTimeout` is 120 s.
+- `test/globalSetup.js` starts one memory replica set and shares its URI via `provide("mongoUri")`. `test/setup.js` connects each worker to its own database (`test-${VITEST_POOL_ID}`) and empties every collection `beforeEach`, so tests are repeatable and order-independent.
+- Test env values live in `vitest.config.js` `test.env` (`LOG_LEVEL=silent`, a placeholder `MONGODB_URI` that is never connected to).
+- Build apps with `createApp({ rateLimits })` to use low limits in tests; mock a module with `vi.mock` (e.g. `config/db.js`) rather than reaching into library internals.
 - Every endpoint: at least one success test **and** a test for each domain error code listed for it in section 7.
 - The order transition table is tested exhaustively: every allowed transition succeeds, every other pair returns `INVALID_ORDER_TRANSITION`, and concurrent transitions produce exactly one winner and one `ORDER_STATUS_CHANGED`.
 - Concurrency: two simultaneous order creations at 2 open orders produce exactly one success and one `TOO_MANY_OPEN_ORDERS`; two simultaneous requests with the same `Idempotency-Key` produce one order, returned to both.
@@ -388,7 +404,9 @@ EXPO_ACCESS_TOKEN
 BILL_CONFIRMATION_TIMEOUT_MINUTES     # 60 in .env.example
 ```
 
-All validated by Zod in `config/env.js`; the app refuses to start if any required value is missing. `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally).
+All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
+
+**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`. Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
 
 Local development uses a separate Atlas dev cluster (or Docker `mongo` started with `--replSet rs0`). A MongoDB installed as a Windows service starts standalone; it needs `replication.replSetName` in `mongod.cfg` and a one-time `rs.initiate()` before transactions work.
 
@@ -397,8 +415,6 @@ Local development uses a separate Atlas dev cluster (or Docker `mongo` started w
 ```bash
 npm run dev                   # node --watch --env-file=.env src/server.js
 npm start                     # node src/server.js (env comes from the host)
-npm run lint
-npm run knip
 npm test
 npm run admin:create          # node --env-file=.env scripts/admin-create.js
 npm run admin:reset-password
@@ -409,12 +425,14 @@ npm run admin:list
 npm run storage:setup         # create/update the private prescriptions bucket
 ```
 
+From the repo root: `npm run dev -w backend`, `npm test -w backend`. Lint, knip and typecheck run from the root only.
+
 Run the admin scripts from PowerShell, Windows Terminal or the VS Code terminal (they need a TTY for the hidden password prompt).
 
 ## 15. Deployment (Render)
 
 - One **web service**, one instance, autoscaling off (rate limits and jobs are in-process). The instance must be **always on**: Render's free instances spin down when idle, which stops the bill-expiry and cleanup jobs and makes the first request after a pause slow. Plan and region are open decisions (root D4) — ask before the first deployment.
-- The backend depends on the `shared` workspace, so Render builds from the **repo root**: build command installs the workspaces (root `postinstall` builds `shared`), start command runs the backend's `start` script. Pin Node through `engines` / `.nvmrc`, and check how Render picks the Node version when setting it up.
+- The backend depends on the `shared` workspace, so Render builds from the **repo root** — never set the service's root directory to `backend/`. Build command: `npm ci --include=dev` (the root `postinstall` builds `shared`, which needs TypeScript, a dev dependency). Start command: `npm start -w backend`. Pin Node through `engines` / `.nvmrc`, and check how Render picks the Node version when setting it up.
 - Environment variables are set in the Render dashboard (never committed); `PORT` is provided by Render and `env.js` reads it like any other value.
 - Health check path: `/health`.
 - Render stops the old instance with `SIGTERM` on each deploy, so graceful shutdown (§11) must finish within Render's shutdown grace period.

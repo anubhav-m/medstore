@@ -10,8 +10,12 @@ This file holds the project-wide rules. `backend/CLAUDE.md` and `mobile/CLAUDE.m
 medical-store/                # npm workspaces
 ├── CLAUDE.md
 ├── package.json              # workspaces + repo-wide scripts and dev tooling only
+├── eslint.config.js          # flat config for all workspaces (JS + TS)
+├── knip.json                 # one entry per workspace
+├── .prettierrc.json          # + .prettierignore (Markdown is hand-formatted, not Prettier'd)
 ├── .gitattributes            # * text=auto eol=lf
-├── .nvmrc
+├── .nvmrc                    # exact Node version
+├── .npmrc                    # engine-strict=true: npm refuses the wrong Node version
 ├── backend/                  # Express + MongoDB API — JavaScript, ES modules
 ├── shared/                   # @medstore/shared — constants + types used by backend AND apps
 └── mobile/
@@ -32,7 +36,7 @@ The API types are hand-written (the backend validates with Zod in JavaScript), s
 | Area | Choice |
 |---|---|
 | Monorepo | npm workspaces |
-| Runtime | Node.js — the Active LTS line at scaffold time (check nodejs.org, don't rely on memory), pinned in `engines` + `.nvmrc`. Upgrading Node is its own session. |
+| Runtime | Node.js **22.14.0** (Node 22, maintenance LTS — kept by the user's choice; Node 24 is the active LTS), pinned in `.nvmrc`, `engines` (`^22.14.0`) and enforced by `.npmrc` `engine-strict`. Upgrading Node is its own session. |
 | API | Express 5, Mongoose, Zod, Pino, Helmet, express-rate-limit |
 | Auth | argon2, jsonwebtoken, google-auth-library |
 | Database | MongoDB Atlas (replica set, so transactions work); tests use `mongodb-memory-server` |
@@ -41,14 +45,15 @@ The API types are hand-written (the backend validates with Zod in JavaScript), s
 | Push | Expo push service with enhanced push security (`expo-server-sdk` on the backend, `expo-notifications` in apps) |
 | Email | Resend, called with global `fetch` from `backend/src/services/email.js` (no SDK) |
 | Mobile | Expo SDK (latest stable), Expo Router, Redux Toolkit + RTK Query, react-native-reanimated, react-native-maps, expo-location, expo-image-picker, expo-image-manipulator, expo-secure-store |
-| Quality | ESLint + Prettier (`endOfLine: "lf"`), knip, Vitest + Supertest |
+| Quality | ESLint (flat config, `defineConfig`) + Prettier (`endOfLine: "lf"`), knip, Vitest + Supertest |
+| TypeScript | 6.0.x in `shared` — **not 7.x** until `typescript-eslint` supports it (its peer range stops below 6.1) |
 
 Verify exact versions with `npm view <pkg> version` — never rely on memory for versions.
 
 ## Build plan & git
 
-- The folder is **not a git repo yet**. The scaffold session runs `git init` (branch `main`) and adds `.gitignore` and `.gitattributes` before anything else.
-- Backend first, one feature per session, each on its own branch `feature/<name>` from `main`: scaffold → customer auth → admin auth + CLI scripts → onboarding + addresses → stores → uploads → customer orders → admin order actions → notifications → owner tools (reports, blocking customers) → jobs (bill expiry, unused uploads) → account deletion → full security review. Mobile apps come after.
+- Remote: `git@github.com:anubhav-m/medstore.git`, default branch `main`.
+- Backend first, one feature per session, each on its own branch `feat/<name>` from `main`: scaffold → customer auth → admin auth + CLI scripts → onboarding + addresses → stores → uploads → customer orders → admin order actions → notifications → owner tools (reports, blocking customers) → jobs (bill expiry, unused uploads) → account deletion → full security review. Mobile apps come after.
 - Every session starts with a cleared context. Decisions live in these CLAUDE.md files and in the code, never only in chat.
 
 ---
@@ -274,7 +279,7 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 | Login attempts | customer: 10 per 15 min per IP+email; admin: 5 failed per 15 min per username, plus per IP |
 | Customer password / admin password | 8–128 / 12–128 chars |
 | Admin username | 3–30 chars, lowercase letters, digits, `.` `_` |
-| Names (customer, patient) | 2–80 chars |
+| Names | customer 2–80 chars; patient 2–100 chars |
 | Customer note / reason note | ≤ 500 / ≤ 300 chars |
 | Address label / line1 / line2 / landmark / city | ≤ 30 / 120 / 120 / 120 / 60 chars; pincode 6 digits, not starting with 0 |
 | Bill | 1–50 items; name 2–100 chars; quantity 1–999; unit price 1–10,000,000 paise; delivery fee 0–100,000 paise |
@@ -291,8 +296,8 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 npm install            # installs all workspaces; postinstall builds shared/
 npm run build:shared
 npm run dev:shared     # tsc --watch while editing shared/
-npm run lint           # all workspaces
-npm run typecheck      # shared + mobile workspaces
+npm run lint           # eslint + prettier --check, all workspaces
+npm run typecheck      # shared (+ mobile workspaces later)
 npm run knip
 npm test               # all workspaces with tests
 npm audit
