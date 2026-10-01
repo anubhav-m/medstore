@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node src/server.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "admin:create": "node --env-file=.env scripts/admin-create.js",
+    "admin:reset-password": "node --env-file=.env scripts/admin-reset-password.js",
+    "admin:disable": "node --env-file=.env scripts/admin-disable.js",
+    "admin:enable": "node --env-file=.env scripts/admin-enable.js",
+    "admin:list": "node --env-file=.env scripts/admin-list.js"
   },
   "dependencies": {
     "@medstore/shared": "*",

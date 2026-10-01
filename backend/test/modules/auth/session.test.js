@@ -95,6 +95,14 @@ describe("POST /auth/logout", () => {
     await logout("never-issued").expect(200);
   });
 
+  it("doesn't treat a logged-out token presented again as reuse", async () => {
+    const first = await registerAndVerify(app, EMAIL);
+    const second = (await login(app, EMAIL)).body.data;
+    await logout(first.refreshToken).expect(200);
+    expectInvalidToken(await refresh(first.refreshToken));
+    await refresh(second.refreshToken).expect(200);
+  });
+
   it("leaves the user's other sessions signed in", async () => {
     const first = await registerAndVerify(app, EMAIL);
     const second = (await login(app, EMAIL)).body.data;

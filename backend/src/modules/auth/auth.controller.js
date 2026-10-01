@@ -3,6 +3,7 @@ import { sendSuccess } from "../../utils/sendSuccess.js";
 import * as loginService from "./login.service.js";
 import * as otpService from "./otp.service.js";
 import * as passwordResetService from "./passwordReset.service.js";
+import { SubjectKind } from "./refreshToken.model.js";
 import * as sessionService from "./session.service.js";
 import * as signupService from "./signup.service.js";
 
@@ -84,7 +85,7 @@ export const refresh = async (req, res, next) => {
 
 export const logout = async (req, res, next) => {
   try {
-    await sessionService.revokeRefreshToken(req.validated.body.refreshToken);
+    await sessionService.revokeRefreshToken(req.validated.body.refreshToken, SubjectKind.CUSTOMER);
     return sendSuccess(res, { message: "Signed out" });
   } catch (error) {
     return next(error);

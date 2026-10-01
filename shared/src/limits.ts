@@ -15,3 +15,12 @@ export const OTP_EXPIRY_MINUTES = 10;
 export const OTP_MAX_ATTEMPTS = 5;
 export const CODE_RESEND_COOLDOWN_SECONDS = 60;
 export const CODE_SENDS_PER_EMAIL_PER_HOUR = 5;
+
+export const ADMIN_USERNAME_MIN_LENGTH = 3;
+export const ADMIN_USERNAME_MAX_LENGTH = 30;
+export const ADMIN_USERNAME_PATTERN = /^[a-z0-9._]+$/;
+export const ADMIN_NAME_MIN_LENGTH = 2;
+export const ADMIN_NAME_MAX_LENGTH = 80;
+// Longer than customers': admins can see every customer's health data.
+export const ADMIN_PASSWORD_MIN_LENGTH = 12;
+export const ADMIN_PASSWORD_MAX_LENGTH = 128;

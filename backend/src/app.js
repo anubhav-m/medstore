@@ -8,6 +8,7 @@ import { createRateLimit } from "./middleware/rateLimit.js";
 import { requestId } from "./middleware/requestId.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
+import { createAdminRoutes } from "./routes/admin.routes.js";
 import { createCustomerRoutes } from "./routes/customer.routes.js";
 
 // Tests pass only the limits they lower; the rest keep their defaults.
@@ -25,6 +26,7 @@ export const createApp = ({ rateLimits: overrides } = {}) => {
   app.use(express.json({ limit: "100kb" }));
 
   app.use(healthRoutes);
+  app.use("/api/v1/admin", createAdminRoutes(rateLimits));
   app.use("/api/v1", createCustomerRoutes(rateLimits));
 
   app.use(notFound);

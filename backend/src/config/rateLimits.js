@@ -10,5 +10,8 @@ export const rateLimits = {
   customerLogin: { windowMs: FIFTEEN_MINUTES, limit: 10 },
   // verify-email, reset-password — per IP, on top of the attempts allowed per code
   codeCheck: { windowMs: FIFTEEN_MINUTES, limit: 20 },
+  // Admin login and change-password count failed attempts only (root 3.8).
+  adminLogin: { windowMs: FIFTEEN_MINUTES, limit: 5 }, // per username
+  adminLoginIp: { windowMs: FIFTEEN_MINUTES, limit: 20 }, // per IP
   refresh: { windowMs: FIFTEEN_MINUTES, limit: 30 },
 };

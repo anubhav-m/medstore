@@ -183,8 +183,8 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 - Customers and admins are **separate token worlds**: different access-token secrets (`JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`) and an `aud` claim of `customer` or `admin`. `authCustomer` and `authAdmin` each verify their own secret **and** audience, so a customer token can never pass admin middleware.
 - JWTs are signed and verified with `HS256` only (pass `algorithms: ["HS256"]` to verify). `env.js` requires every secret (the access-token secrets and `OTP_HMAC_SECRET`) to be ≥ 32 characters and all of them to be distinct.
 - Access tokens: JWT, 15 minutes. Refresh tokens: 32 random bytes (`crypto.randomBytes`, base64url), opaque, so they need no signing secret. They are stored as SHA-256 hashes, rotated on every use and revoked on logout. Customer refresh lifetime 30 days, admin 7 days. Refresh and logout take the refresh token in the body.
-- `modules/auth/session.service.js` holds the refresh-token logic for both worlds (`subjectKind` `CUSTOMER` | `ADMIN`). Rotation is one conditional update (`{ tokenHash, subjectKind, revokedAt: null, expiresAt > now }` → set `revokedAt`).
-- Reuse of an already-rotated refresh token revokes all of that subject's sessions. Rotated tokens are kept (revoked) until they expire so reuse can be detected. An unknown or expired token is just `INVALID_TOKEN`.
+- `modules/auth/session.service.js` holds the token logic for both worlds (`subjectKind` `CUSTOMER` | `ADMIN`): `issueTokens`, `verifyAccessToken` (used by `authCustomer` and `authAdmin`), `rotateRefreshToken`, `revokeRefreshToken`, `revokeAllSessions`. Every refresh-token query includes `subjectKind`, so a token from one world never refreshes or logs out the other. Rotation is one conditional update (`{ tokenHash, subjectKind, revokedAt: null, expiresAt > now }` → set `revokedAt` and `rotatedAt`).
+- Reuse of an already-rotated refresh token (`rotatedAt` set) revokes all of that subject's sessions. Rotated tokens are kept (revoked) until they expire so reuse can be detected. A token revoked by logout, password change or a script is just `INVALID_TOKEN`: other devices present it in good faith, and treating that as reuse would also revoke the fresh session a password change just issued. An unknown or expired token is just `INVALID_TOKEN`.
 - **The auth middleware loads the subject on every request** (one indexed read). A deleted customer → `INVALID_TOKEN`. An inactive admin → `ACCOUNT_DISABLED`. An admin's `role`, `storeIds` and `mustChangePassword` always come from the database, never from the token, so changes apply immediately.
 - **All of a subject's sessions are revoked** on password reset, password change (the response carries fresh tokens for the current device), admin disable, admin password reset by script, and account deletion.
 - Passwords: argon2id (`utils/password.js`); lengths from root 3.8. Auth failures are generic ("Invalid email or password"). An unknown email, or an account without a password, is still verified against a fixed dummy hash, so response time doesn't reveal which emails exist.
@@ -209,22 +209,26 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ### Admins
 
-- Login with username + password. `isActive: false` → `ACCOUNT_DISABLED`. Record `lastLoginAt`. No lockout (it would let anyone lock staff out); failed logins are rate-limited per username and per IP instead.
-- If `mustChangePassword` is set, the admin may call only change-password, logout and `GET /me`; everything else returns `PASSWORD_CHANGE_REQUIRED`.
+- Login with username (trimmed, lowercased) + password. The password is checked first (unknown usernames against the dummy hash), then `isActive: false` → `ACCOUNT_DISABLED`, so a wrong password never reveals a disabled account. Record `lastLoginAt`.
+- No account lockout flag. Failed logins are rate-limited instead (`adminLogin`, 5 failed per 15 min per username across all IPs; `adminLoginIp`, 20 failed per 15 min per IP, shared with change-password). Only failed attempts count, so staff sharing a shop's IP don't block each other. Trade-off (accepted): anyone can block new logins for one username for up to 15 minutes; existing sessions keep refreshing.
+- Admin passwords are 12–128 characters (customers 8–128) because admins can see every customer's health data.
+- `middleware/authAdmin.js` exports `authAdmin` (every admin route) and `authAdminAllowPasswordChange` (only change-password and `GET /me`; logout uses the refresh token alone). While `mustChangePassword` is set, `authAdmin` returns `PASSWORD_CHANGE_REQUIRED`. Both set `req.admin = { id }`; the stores feature adds `role` and `storeIds` (read from the database, never the token).
+- `change-password` `{ currentPassword, newPassword }`: wrong current → `INVALID_CREDENTIALS`; a new password equal to the current one → `VALIDATION_ERROR` on `newPassword`. Success clears `mustChangePassword`, revokes every session and returns a fresh pair.
 - `requireRole("OWNER")` guards owner-only routes (`FORBIDDEN` for staff).
 - **Store scoping**: every admin query on orders and item suggestions includes `storeId: { $in: scope }`, where `scope` comes from one helper, `getStoreScope(admin)` (all stores for `OWNER`, `admin.storeIds` for `STAFF`). Out-of-scope resources return 404. Customer and report endpoints are owner-only.
 
 ### Admin CLI scripts (`backend/scripts/`)
 
-- `npm run admin:create` — prompts for username, name, role, store codes (staff only) and password. Hashes with argon2 and sets `mustChangePassword: true`.
-- `npm run admin:reset-password` (sets `mustChangePassword`, revokes sessions), `admin:disable` (revokes sessions), `admin:enable`, `admin:set-stores` (replaces a staff member's store codes), `admin:list` (username, name, role, store codes, active — never hashes).
-- Passwords are entered in a **hidden prompt**, never as a CLI argument (arguments end up in shell history, including PowerShell's). Implement it with `node:readline` plus `process.stdin.setRawMode`; if stdin is not a TTY, refuse to run with a clear message (Git Bash's mintty is not a TTY — use PowerShell, Windows Terminal or the VS Code terminal).
+- `npm run admin:create` — prompts for username, name, role, store codes (staff only) and password. Hashes with argon2 and sets `mustChangePassword: true`. **Until the stores feature it creates `OWNER`s only and doesn't ask for a role.**
+- `npm run admin:reset-password` (sets `mustChangePassword`, revokes sessions), `admin:disable` (revokes sessions), `admin:enable`, `admin:set-stores` (replaces a staff member's store codes), `admin:list` (username, name, role, store codes, active — never hashes). `admin:set-stores` and the store-codes column of `admin:list` arrive with the stores feature.
+- Passwords are entered in a **hidden prompt**, twice, never as a CLI argument (arguments end up in shell history, including PowerShell's). `scripts/lib/prompt.js` implements it with `node:readline` keypress events plus `process.stdin.setRawMode`; if stdin is not a TTY, `scripts/lib/runAdminScript.js` refuses to run with a clear message (Git Bash's mintty is not a TTY — use PowerShell, Windows Terminal or the VS Code terminal). Answers are validated with the Zod field schemas in `modules/admins/admin.validation.js` and re-asked when invalid.
+- Scripts print with `process.stdout.write` (no `console.*`) and never print a password or hash.
 - Before writing, every script prints the target database host and name and requires typing `yes`.
 - Scripts reuse `modules/admins/admin.service.js` and `config/env.js`; they contain no separate hashing or DB logic.
 
 ### Rate limits
 
-Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password) and `refresh`. Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
+Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `adminLogin` (per username, failed only) and `adminLoginIp` (per IP, failed only; admin login and change-password). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
 
 ## 7. API surface
 
@@ -267,9 +271,9 @@ Admin — `/api/v1/admin`:
 | --- | --- | --- |
 | `POST /auth/login` | `{ username, password }` → tokens + admin (role, stores, `mustChangePassword`) | `INVALID_CREDENTIALS`, `ACCOUNT_DISABLED` |
 | `POST /auth/refresh` | `{ refreshToken }` | `INVALID_TOKEN`, `ACCOUNT_DISABLED` |
-| `POST /auth/logout` | `{ refreshToken, pushToken? }` | — |
+| `POST /auth/logout` | `{ refreshToken, pushToken? }` (`pushToken` arrives with the push-tokens feature); no access token needed; always succeeds | — |
 | `POST /auth/change-password` | `{ currentPassword, newPassword }` → fresh tokens; clears `mustChangePassword` | `INVALID_CREDENTIALS` |
-| `GET /me` | admin + scoped stores `{ id, code, name }` | — |
+| `GET /me` | admin + scoped stores `{ id, code, name }` (admin auth returns `{ admin: { id, username, name, role, storeIds, mustChangePassword } }`; the stores feature adds the scoped stores) | — |
 | `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body | — |
 | `GET /orders?storeId=&tab=&q=&page=` | `tab` from `ADMIN_ORDER_TABS`; `q` = order number or phone prefix; no image URLs | `STORE_NOT_FOUND` |
 | `GET /orders/counts?storeId=` | count per tab | `STORE_NOT_FOUND` |
@@ -316,7 +320,7 @@ orders         orderNumber, userId, storeId, status, idempotencyKey, reorderedFr
                deliveredAt?, rejection? { code, note }, cancellation? { byKind, code, note },
                deliveryFailure? { code, note }, statusHistory[{ status, at, by { kind, id? }, note? }]
 uploads        userId, path, contentType, sizeBytes, attachedAt? (set when first used by an order)
-refreshTokens  tokenHash, subjectKind (CUSTOMER | ADMIN), subjectId, expiresAt, revokedAt?
+refreshTokens  tokenHash, subjectKind (CUSTOMER | ADMIN), subjectId, expiresAt, revokedAt?, rotatedAt?
 otpCodes       userId, purpose (VERIFY_EMAIL | RESET_PASSWORD), codeHash (HMAC), attempts, expiresAt
 codeSends      email, purpose — one per code-send request, kept 1 hour (per-email send limits)
 counters       _id (store code), seq — never reset
@@ -417,7 +421,7 @@ BILL_CONFIRMATION_TIMEOUT_MINUTES     # 60 in .env.example
 
 All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
 
-**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
+**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
 
 Local development uses a separate Atlas dev cluster (or Docker `mongo` started with `--replSet rs0`). A MongoDB installed as a Windows service starts standalone; it needs `replication.replSetName` in `mongod.cfg` and a one-time `rs.initiate()` before transactions work.
 

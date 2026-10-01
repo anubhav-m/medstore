@@ -10,6 +10,7 @@ export default defineConfig({
       LOG_LEVEL: "silent",
       TRUST_PROXY: "0",
       JWT_CUSTOMER_ACCESS_SECRET: "test-customer-access-secret-0123456789abcdef",
+      JWT_ADMIN_ACCESS_SECRET: "test-admin-access-secret-0123456789abcdef0",
       OTP_HMAC_SECRET: "test-otp-hmac-secret-0123456789abcdef0123",
       GOOGLE_WEB_CLIENT_ID: "test-client.apps.googleusercontent.com",
       EMAIL_API_KEY: "test-email-api-key",

@@ -13,6 +13,9 @@ const refreshTokenSchema = new mongoose.Schema(
     expiresAt: { type: Date, required: true },
     // Rotated tokens stay (revoked) until they expire so reuse can be detected.
     revokedAt: { type: Date, default: null },
+    // Set only by rotation: a token revoked by logout or a password change is presented again
+    // by a legitimate device that hasn't heard yet, which must not count as reuse.
+    rotatedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

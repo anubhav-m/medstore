@@ -8,6 +8,7 @@ const valid = {
   LOG_LEVEL: "info",
   TRUST_PROXY: "1",
   JWT_CUSTOMER_ACCESS_SECRET: "customer-access-secret-0123456789abcdef",
+  JWT_ADMIN_ACCESS_SECRET: "admin-access-secret-0123456789abcdef012",
   OTP_HMAC_SECRET: "otp-hmac-secret-0123456789abcdef01234",
   GOOGLE_WEB_CLIENT_ID: "1234-abc.apps.googleusercontent.com",
   EMAIL_API_KEY: "re_example_key",
@@ -50,6 +51,7 @@ describe("parseEnv", () => {
     ["LOG_LEVEL", "verbose"],
     ["TRUST_PROXY", "-1"],
     ["JWT_CUSTOMER_ACCESS_SECRET", "too-short-secret"],
+    ["JWT_ADMIN_ACCESS_SECRET", "too-short-secret"],
     ["OTP_HMAC_SECRET", "too-short-secret"],
     ["GOOGLE_WEB_CLIENT_ID", "not-a-client-id"],
     ["EMAIL_FROM", "MedStore"],
@@ -60,10 +62,14 @@ describe("parseEnv", () => {
     if (value) expect(message).not.toContain(value);
   });
 
-  it("rejects identical access and OTP secrets", () => {
-    const message = errorMessage({ ...valid, OTP_HMAC_SECRET: valid.JWT_CUSTOMER_ACCESS_SECRET });
-    expect(message).toContain("OTP_HMAC_SECRET");
-    expect(message).not.toContain(valid.JWT_CUSTOMER_ACCESS_SECRET);
+  it.each([
+    ["JWT_ADMIN_ACCESS_SECRET", "JWT_CUSTOMER_ACCESS_SECRET"],
+    ["OTP_HMAC_SECRET", "JWT_CUSTOMER_ACCESS_SECRET"],
+    ["OTP_HMAC_SECRET", "JWT_ADMIN_ACCESS_SECRET"],
+  ])("rejects %s equal to %s without echoing it", (key, other) => {
+    const message = errorMessage({ ...valid, [key]: valid[other] });
+    expect(message).toContain(`${key}: must differ from ${other}`);
+    expect(message).not.toContain(valid[other]);
   });
 
   it("accepts a bare EMAIL_FROM address", () => {
