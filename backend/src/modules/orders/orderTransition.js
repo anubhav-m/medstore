@@ -6,6 +6,7 @@ import {
   TransitionActor,
 } from "@medstore/shared";
 import { AppError } from "../../utils/AppError.js";
+import { notifyTransition } from "../notifications/orderNotifications.js";
 import { Order } from "./order.model.js";
 
 // The table names who may act; the history records which kind of account did.
@@ -61,6 +62,7 @@ const classifyMiss = async ({ orderId, action, scope, billVersion, now }, readSt
  *
  * One conditional update on the status that was read (plus the bill version and expiry when they
  * apply), so concurrent actions produce exactly one winner. Returns the updated order (lean).
+ * The winner's push notification (root 3.6) starts after the write, without being awaited.
  */
 export const transitionOrder = async ({
   orderId,
@@ -100,6 +102,9 @@ export const transitionOrder = async ({
     },
     { returnDocument: "after", runValidators: true },
   ).lean();
-  if (updated) return updated;
+  if (updated) {
+    notifyTransition(updated, action);
+    return updated;
+  }
   return classifyMiss({ orderId, action, scope, billVersion, now }, current.status);
 };

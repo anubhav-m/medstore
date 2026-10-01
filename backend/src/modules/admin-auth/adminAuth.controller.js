@@ -1,6 +1,7 @@
 import { sendSuccess } from "../../utils/sendSuccess.js";
 import { SubjectKind } from "../auth/refreshToken.model.js";
 import * as sessionService from "../auth/session.service.js";
+import * as pushTokenService from "../notifications/pushToken.service.js";
 import * as adminAuthService from "./adminAuth.service.js";
 
 export const login = async (req, res, next) => {
@@ -23,8 +24,34 @@ export const refresh = async (req, res, next) => {
 
 export const logout = async (req, res, next) => {
   try {
-    await sessionService.revokeRefreshToken(req.validated.body.refreshToken, SubjectKind.ADMIN);
+    await sessionService.logout(SubjectKind.ADMIN, req.validated.body);
     return sendSuccess(res, { message: "Signed out" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const registerPushToken = async (req, res, next) => {
+  try {
+    await pushTokenService.registerPushToken(
+      SubjectKind.ADMIN,
+      req.admin.id,
+      req.validated.body.token,
+    );
+    return sendSuccess(res, { message: "Notifications turned on" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const removePushToken = async (req, res, next) => {
+  try {
+    await pushTokenService.removePushToken(
+      SubjectKind.ADMIN,
+      req.admin.id,
+      req.validated.body.token,
+    );
+    return sendSuccess(res, { message: "Notifications turned off" });
   } catch (error) {
     return next(error);
   }

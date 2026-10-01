@@ -28,6 +28,8 @@ backend/
     │   ├── stores/           # store model, isStoreOpen, nextOpensAt, geo queries
     │   ├── uploads/          # upload model, signed upload URLs
     │   ├── orders/           # both surfaces, transitions, bill, reorder, counters, item suggestions
+    │   ├── notifications/    # push tokens (register / remove / move, used by users + admin-auth),
+    │   │                     # order notifications (recipients, texts, sending)
     │   ├── customers/        # admin side: block / unblock
     │   └── reports/          # daily summary
     ├── services/             # integrations only: storage.js, email.js, push.js, googleAuth.js
@@ -188,10 +190,11 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 - Customers and admins are **separate token worlds**: different access-token secrets (`JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`) and an `aud` claim of `customer` or `admin`. `authCustomer` and `authAdmin` each verify their own secret **and** audience, so a customer token can never pass admin middleware.
 - JWTs are signed and verified with `HS256` only (pass `algorithms: ["HS256"]` to verify). `env.js` requires every secret (the access-token secrets and `OTP_HMAC_SECRET`) to be ≥ 32 characters and all of them to be distinct.
 - Access tokens: JWT, 15 minutes. Refresh tokens: 32 random bytes (`crypto.randomBytes`, base64url), opaque, so they need no signing secret. They are stored as SHA-256 hashes, rotated on every use and revoked on logout. Customer refresh lifetime 30 days, admin 7 days. Refresh and logout take the refresh token in the body.
-- `modules/auth/session.service.js` holds the token logic for both worlds (`subjectKind` `CUSTOMER` | `ADMIN`): `issueTokens`, `verifyAccessToken` (used by `authCustomer` and `authAdmin`), `rotateRefreshToken`, `revokeRefreshToken`, `revokeAllSessions`. Every refresh-token query includes `subjectKind`, so a token from one world never refreshes or logs out the other. Rotation is one conditional update (`{ tokenHash, subjectKind, revokedAt: null, expiresAt > now }` → set `revokedAt` and `rotatedAt`).
+- `modules/auth/session.service.js` holds the token logic for both worlds (`subjectKind` `CUSTOMER` | `ADMIN`): `issueTokens`, `verifyAccessToken` (used by `authCustomer` and `authAdmin`), `rotateRefreshToken`, `logout`, `revokeAllSessions`. Every refresh-token query includes `subjectKind`, so a token from one world never refreshes or logs out the other. Rotation is one conditional update (`{ tokenHash, subjectKind, revokedAt: null, expiresAt > now }` → set `revokedAt` and `rotatedAt`).
 - Reuse of an already-rotated refresh token (`rotatedAt` set) revokes all of that subject's sessions. Rotated tokens are kept (revoked) until they expire so reuse can be detected. A token revoked by logout, password change or a script is just `INVALID_TOKEN`: other devices present it in good faith, and treating that as reuse would also revoke the fresh session a password change just issued. An unknown or expired token is just `INVALID_TOKEN`.
 - **The auth middleware loads the subject on every request** (one indexed read). A deleted customer → `INVALID_TOKEN`. An inactive admin → `ACCOUNT_DISABLED`. An admin's `role`, `storeIds` and `mustChangePassword` always come from the database, never from the token, so changes apply immediately.
-- **All of a subject's sessions are revoked** on password reset, password change (the response carries fresh tokens for the current device), admin disable, admin password reset by script, and account deletion.
+- **All of a subject's sessions are revoked** on password reset, password change (the response carries fresh tokens for the current device), admin disable, admin password reset by script, and account deletion. `revokeAllSessions` also deletes all of the subject's push tokens (root 3.6), so the current device re-registers its token after a password change.
+- `logout(subjectKind, { refreshToken, pushToken? })` revokes the refresh token and removes `pushToken` from the subject that token was issued to — also when it was already revoked (a password change elsewhere), never when it is unknown. So nobody can remove another account's push token by sending it with their own or a made-up refresh token.
 - Passwords: argon2id (`utils/password.js`); lengths from root 3.8. Auth failures are generic ("Invalid email or password"). An unknown email, or an account without a password, is still verified against a fixed dummy hash, so response time doesn't reveal which emails exist.
 
 ### Customers
@@ -251,13 +254,13 @@ Customer — `/api/v1`:
 | `POST /auth/forgot-password` | `{ email }`; same response whether or not the email exists | — |
 | `POST /auth/reset-password` | `{ email, code, newPassword }`; revokes all sessions; no tokens | `INVALID_OR_EXPIRED_CODE`, `TOO_MANY_ATTEMPTS` |
 | `POST /auth/refresh` | `{ refreshToken }` → new pair | `INVALID_TOKEN` |
-| `POST /auth/logout` | `{ refreshToken, pushToken? }` (`pushToken` arrives with the push-tokens feature); always succeeds | — |
+| `POST /auth/logout` | `{ refreshToken, pushToken? }`; `pushToken` is removed from the refresh token's account (§6); always succeeds | — |
 | `GET /me` | `{ user: CustomerProfile }`: auth fields + `isBlocked`, `hasPassword`, `name`, `phone`, `dob`, `gender`, `consentAcceptedAt`, `consentVersion` (auth endpoints still return `AuthUser`) | — |
 | `PATCH /me` | `{ name?, phone?, dob?, gender? }`, at least one; `null` clears `dob` / `gender` | — |
 | `POST /me/password` | `{ currentPassword, newPassword }` → fresh tokens | `INVALID_CREDENTIALS` (also when the account has no password) |
 | `DELETE /me` | `{ password }` or `{ googleIdToken }` | `INVALID_CREDENTIALS`, `ACCOUNT_HAS_OPEN_ORDERS` |
 | `POST /me/onboarding` | `{ name, phone, address, consentAccepted: true }` → `{ user, address }` | `ONBOARDING_ALREADY_COMPLETED` |
-| `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body (never in the URL) | — |
+| `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body (never in the URL), an Expo push token (≤ 200 chars, SDK check); no data in the response. POST makes it the account's newest (≤ 10 kept) and removes it from every other customer and admin; DELETE removes it from the caller only. Not †: works before onboarding and for blocked customers | — |
 | `GET /addresses` † | all (≤ 10), default first then newest; not paginated | — |
 | `POST /addresses` † | `{ label, line1, line2?, landmark?, city, pincode, lat, lng, isDefault? }` → `{ address }` | `ADDRESS_LIMIT_REACHED` |
 | `PATCH /addresses/:id` † | any of the create fields (`lat` + `lng` together; `null` clears `line2` / `landmark`; `isDefault` only `true`) → `{ address }` | `ADDRESS_NOT_FOUND` |
@@ -279,10 +282,10 @@ Admin — `/api/v1/admin`:
 | --- | --- | --- |
 | `POST /auth/login` | `{ username, password }` → tokens + admin (role, stores, `mustChangePassword`) | `INVALID_CREDENTIALS`, `ACCOUNT_DISABLED` |
 | `POST /auth/refresh` | `{ refreshToken }` | `INVALID_TOKEN`, `ACCOUNT_DISABLED` |
-| `POST /auth/logout` | `{ refreshToken, pushToken? }` (`pushToken` arrives with the push-tokens feature); no access token needed; always succeeds | — |
+| `POST /auth/logout` | `{ refreshToken, pushToken? }`; no access token needed; `pushToken` is removed from the refresh token's admin (§6); always succeeds | — |
 | `POST /auth/change-password` | `{ currentPassword, newPassword }` → fresh tokens; clears `mustChangePassword` | `INVALID_CREDENTIALS` |
 | `GET /me` | `{ admin: { id, username, name, role, storeIds, mustChangePassword }, stores: [{ id, code, name }] }` — `stores` are the scoped stores by code | — |
-| `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body | — |
+| `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body; same rules as the customer endpoints (`authAdmin`, so not while `mustChangePassword`) | — |
 | `GET /orders?storeId=&tab=&q=&page=&limit=` | `{ orders: AdminOrderSummary[] }` + `meta`; `tab` from `ADMIN_ORDER_TABS`, sorted as its table says (no `tab`: every status, newest first); `q` (1–50 chars) = order-number prefix or phone (see below); no image URLs | `STORE_NOT_FOUND` |
 | `GET /orders/counts?storeId=` | `{ counts: Record<AdminOrderTab, number> }` from one aggregation | `STORE_NOT_FOUND` |
 | `GET /orders/:id` | `{ order: AdminOrderDetail }`: signed `imageUrls` (600 s), the copied customer `{ id, name, phone }`, history with admin names | `ORDER_NOT_FOUND`, `SERVICE_UNAVAILABLE` (signing failed) |
@@ -344,8 +347,8 @@ counters       _id (store code), seq — never reset
 
 - `toJSON` strips `__v`, `passwordHash` and other secrets. Customers never receive `statusHistory[].by.id`.
 - **Index every field you query, sort or keep unique.** Required indexes:
-  - `users`: `email` unique; `googleId` unique sparse
-  - `admins`: `username` unique
+  - `users`: `email` unique; `googleId` unique sparse; `pushTokens.token` (moving a token between accounts)
+  - `admins`: `username` unique; `pushTokens.token`
   - `stores`: `code` unique; `location` 2dsphere
   - `addresses`: `{ userId, createdAt: -1 }`; `userId` unique with `partialFilterExpression: { isDefault: true }` (at most one default, enforced by the database)
   - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks). The expiry and report indexes are added by the features that first query them.
@@ -355,10 +358,10 @@ counters       _id (store code), seq — never reset
   - `codeSends`: `{ email, createdAt }`; TTL of 1 hour on `createdAt`
 - **Every unbounded list endpoint is paginated** (default 20, max 100). Bounded lists (addresses ≤ 10, stores) are not. Never `Model.find()` without a limit.
 - Reads use `.lean()` and projections. No N+1 loops — use `$in` or aggregation.
-- Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use a transaction (`mongoose.connection.transaction`, which retries transient conflicts) when several documents must change together: onboarding (profile + first address), address writes (user lock + count / default switch + write), order creation/reorder (user lock + count + insert + marking uploads attached) and account deletion. Local and test Mongo run as a single-node replica set.
+- Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use a transaction (`mongoose.connection.transaction`, which retries transient conflicts) when several documents must change together: onboarding (profile + first address), address writes (user lock + count / default switch + write), order creation/reorder (user lock + count + insert + marking uploads attached), push-token registration (claim on the caller + removal from every other account) and account deletion. Local and test Mongo run as a single-node replica set.
 - Idempotency: look up `(userId, idempotencyKey)` before anything else, and again inside the creation transaction right after `$inc orderCreateSeq`. That write serialises one customer's creates, so a concurrent request with the same key finds the winner's order there and returns it (even at 2 open orders, where it would otherwise fail check 6). The unique index stays as the database-level guarantee.
 - Order numbers: `counter.model.js` `nextOrderNumber(storeCode)` — an atomic `$inc` upsert run just **before** the creation transaction (a failed create leaves a gap; inside the transaction, concurrent first upserts could fail with a non-transient duplicate key).
-- Transitions (`transitionOrder`): check the table and actor, read the order's status within `scope`, then one `findOneAndUpdate` on that exact status (+ `billVersion`, + `billExpiresAt > now` for CONFIRM) that sets the new status and `set` fields and pushes the history entry. A miss is classified by re-reading: `ORDER_STATUS_CHANGED`, then `BILL_CHANGED`, then `BILL_EXPIRED`. Single-document, so no transaction.
+- Transitions (`transitionOrder`): check the table and actor, read the order's status within `scope`, then one `findOneAndUpdate` on that exact status (+ `billVersion`, + `billExpiresAt > now` for CONFIRM) that sets the new status and `set` fields and pushes the history entry. A miss is classified by re-reading: `ORDER_STATUS_CHANGED`, then `BILL_CHANGED`, then `BILL_EXPIRED`. Single-document, so no transaction. After a successful update it calls `notifyTransition(order, action)` (`notifications/orderNotifications.js`), so every status change — customer, staff or system, including the bill-expiry job — sends its root 3.6 notification without the caller doing anything. Order creation and reorder call `notifyOrderPlaced` after the creation transaction commits, only when that call created the order (not for an idempotent replay).
 - Never read-modify-write counters or statuses; use atomic operators and conditional filters.
 - Geo: store locations and address pins are GeoJSON `Point` with `[lng, lat]`. Distance/eligibility uses `$geoNear` (`spherical: true`) from the address point. `deliversToAddress` compares the **exact** distance in metres with the radius; only the displayed `distanceKm` is rounded.
 - Store hours are edited as a pair (`openingMinutes` + `closingMinutes` together), so opening < closing is checked on the request alone, never against stored values.
@@ -380,7 +383,13 @@ counters       _id (store code), seq — never reset
   - Viewing: `createSignedViewUrls(paths)` — `createSignedUrls` for all of an order's images in one call, `SIGNED_VIEW_URL_TTL_SECONDS` (600); an item that can't be signed → 503.
   - No Storage RLS policies: nothing reaches the bucket except this service and the signed URLs it issues. Never make the bucket public.
   - Tests mock `services/storage.js`; they never call Supabase.
-- **Push** (`services/push.js`): `expo-server-sdk` with `accessToken: EXPO_ACCESS_TOKEN` (enhanced push security), send in chunks, delete tokens that return `DeviceNotRegistered`. Called after the DB write; errors are logged, never thrown to the request. Texts (`{n}` = order number, amounts formatted from paise, times in IST):
+- **Push** (`services/push.js`): `expo-server-sdk` with `accessToken: EXPO_ACCESS_TOKEN` (enhanced push security; optional in `env.js`).
+  - `isPushToken(token)` wraps `Expo.isExpoPushToken`; `notifications/pushToken.validation.js` uses it, so no module imports the SDK.
+  - `sendPushNotifications(messages)` — one message per token (`{ to, title, body, data }`; it adds `sound: "default"`, `priority: "high"`), sent in `chunkPushNotifications` chunks. It never throws: a failed request is logged (error name and code, message count) and the next chunk is still sent. It returns `{ unregisteredTokens }` from tickets whose `details.error` is `DeviceNotRegistered` (tickets come back in message order). It has no database access.
+  - `notifications/orderNotifications.js` looks up recipients (root 3.6), builds the texts (`notificationTexts.js`), sends, and deletes the unregistered tokens from users and admins. It runs in the background (`void`, never awaited by the request); every failure is caught and logged with `orderId` and `event` only. Nothing is sent when no recipient has a token.
+  - **Push receipts** (decided by the user): only push tickets are checked now. Receipts (which also report `DeviceNotRegistered`, about 15 minutes later) are checked by a job added in the jobs session (§10).
+  - Logs never contain tokens or notification text.
+  - Texts (`{n}` = order number, amounts formatted from paise with `utils/money.js` `formatRupees`, times in IST with `utils/time.js` `istTimeString`):
 
   | Event | To | Title / body |
   | --- | --- | --- |
@@ -405,7 +414,8 @@ counters       _id (store code), seq — never reset
 
 Each job is an exported function taking `now`, so tests call it directly. `server.js` schedules them with `setInterval` and clears them on shutdown. With one always-on instance (§15) that is enough; every job is safe to run twice.
 
-- `jobs/expireUnconfirmedBills.js` — every 5 minutes: cancels `AWAITING_CONFIRMATION` orders with `billExpiresAt <= now` using the same conditional transition as everything else (`by.kind: SYSTEM`, reason `BILL_EXPIRED`), then notifies per root 3.6.
+- `jobs/expireUnconfirmedBills.js` — every 5 minutes: cancels `AWAITING_CONFIRMATION` orders with `billExpiresAt <= now` using the same conditional transition as everything else (`by.kind: SYSTEM`, reason `BILL_EXPIRED`); `transitionOrder` sends the root 3.6 notifications itself.
+- Push receipts — checks Expo push receipts and deletes tokens they report as `DeviceNotRegistered` (§9). Needs the ticket ids stored when sending; designed in the jobs session.
 - `jobs/deleteUnusedUploads.js` — hourly: for uploads with no `attachedAt` created more than 24 hours ago, deletes the storage object, then the record.
 - There is no retention job: orders and images attached to orders are kept (root D1).
 
@@ -430,6 +440,7 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 - Concurrency: two simultaneous order creations at 2 open orders produce exactly one success and one `TOO_MANY_OPEN_ORDERS`; two simultaneous requests with the same `Idempotency-Key` produce one order, returned to both.
 - Time and distance logic (`isStoreOpen`, `nextOpensAt`, `billExpiresAt`, radius checks) is tested with injected `now` values around opening and closing boundaries. Where a service reads the clock, use `vi.useFakeTimers({ toFake: ["Date"] })` + `vi.setSystemTime` — faking all timers hangs the Mongo driver.
 - Jobs are tested by calling the exported function with a `now`, never by waiting for the interval.
+- Notification tests mock only `sendPushNotifications` (`vi.mock` with `importOriginal`, so the real `isPushToken` still validates) and wait for the background send with `vi.waitFor`. `test/services/push.test.js` mocks `expo-server-sdk` itself. Other tests leave `push.js` real: their accounts have no push tokens, so nothing is sent.
 - Authorization tests: a customer token on admin routes, an admin token on customer routes, staff accessing another store's order or `storeId`, a customer accessing another customer's order, staff on owner-only routes, a disabled admin with a still-valid access token — all rejected.
 - Security tests: Google linking to an unverified account removes its password; a rotated refresh token reused revokes all sessions; regex metacharacters in `q` are matched literally.
 
@@ -447,7 +458,7 @@ BILL_CONFIRMATION_TIMEOUT_MINUTES     # 60 in .env.example
 
 All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
 
-**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend), `SUPABASE_URL` (the bare https project URL — no `/rest/v1` or other path), `SUPABASE_SECRET_KEY` (must start with `sb_secret_`), `SUPABASE_BUCKET` (lowercase bucket name; `prescriptions`), `BILL_CONFIRMATION_TIMEOUT_MINUTES` (1–1440). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
+**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend), `SUPABASE_URL` (the bare https project URL — no `/rest/v1` or other path), `SUPABASE_SECRET_KEY` (must start with `sb_secret_`), `SUPABASE_BUCKET` (lowercase bucket name; `prescriptions`), `BILL_CONFIRMATION_TIMEOUT_MINUTES` (1–1440), `EXPO_ACCESS_TOKEN` (optional; empty counts as absent; required once enhanced push security is on in the Expo project). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
 
 Local development uses a separate Atlas dev cluster (or Docker `mongo` started with `--replSet rs0`). A MongoDB installed as a Windows service starts standalone; it needs `replication.replSetName` in `mongod.cfg` and a one-time `rs.initiate()` before transactions work.
 

@@ -1,7 +1,8 @@
 import { Router } from "express";
-import { authAdminAllowPasswordChange } from "../../middleware/authAdmin.js";
+import { authAdmin, authAdminAllowPasswordChange } from "../../middleware/authAdmin.js";
 import { adminUsernameKey, createRateLimit } from "../../middleware/rateLimit.js";
 import { validate } from "../../middleware/validate.js";
+import { pushTokenRequestSchema } from "../notifications/pushToken.validation.js";
 import * as controller from "./adminAuth.controller.js";
 import * as schemas from "./adminAuth.validation.js";
 
@@ -33,6 +34,19 @@ export const createAdminAuthRoutes = (rateLimits) => {
     controller.changePassword,
   );
   router.get("/me", authAdminAllowPasswordChange, controller.getMe);
+  // The token goes in the body, never the URL.
+  router.post(
+    "/me/push-tokens",
+    authAdmin,
+    validate(pushTokenRequestSchema),
+    controller.registerPushToken,
+  );
+  router.delete(
+    "/me/push-tokens",
+    authAdmin,
+    validate(pushTokenRequestSchema),
+    controller.removePushToken,
+  );
 
   return router;
 };

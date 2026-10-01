@@ -6,6 +6,7 @@ import {
   OtpPurpose,
 } from "@medstore/shared";
 import { z } from "zod";
+import { pushToken } from "../notifications/pushToken.validation.js";
 
 const email = z
   .string()
@@ -44,4 +45,6 @@ export const resetPasswordSchema = {
   body: z.strictObject({ email, code, newPassword: password }),
 };
 export const refreshSchema = { body: z.strictObject({ refreshToken }) };
-export const logoutSchema = { body: z.strictObject({ refreshToken }) };
+export const logoutSchema = {
+  body: z.strictObject({ refreshToken, pushToken: pushToken.optional() }),
+};

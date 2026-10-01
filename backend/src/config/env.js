@@ -49,6 +49,12 @@ const envSchema = z
       .regex(/^[a-z0-9][a-z0-9_-]{1,62}$/, "must be a lowercase bucket name"),
     // Minutes a customer has to confirm a bill; capped at the store's closing time (root 3.4).
     BILL_CONFIRMATION_TIMEOUT_MINUTES: integerString(1, 1440),
+    // Needed only when enhanced push security is on in the Expo project. `--env-file` turns an
+    // empty line into "", which counts as absent.
+    EXPO_ACCESS_TOKEN: z
+      .string()
+      .optional()
+      .transform((value) => value || undefined),
   })
   .superRefine((env, ctx) => {
     // A shared secret would let a token or code from one world pass as another.

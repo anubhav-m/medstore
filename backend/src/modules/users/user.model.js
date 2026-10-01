@@ -1,5 +1,6 @@
 import { Gender } from "@medstore/shared";
 import mongoose from "mongoose";
+import { pushTokenSchema } from "../notifications/pushToken.schema.js";
 
 const userSchema = new mongoose.Schema(
   {
@@ -18,6 +19,7 @@ const userSchema = new mongoose.Schema(
     consentAcceptedAt: { type: Date, default: null },
     consentVersion: { type: String, default: null },
     isBlocked: { type: Boolean, default: false },
+    pushTokens: { type: [pushTokenSchema], default: [] },
     // Bumped first inside every address-write transaction, so concurrent address writes for one
     // customer conflict and run one at a time (address cap, single default).
     addressWriteSeq: { type: Number, default: 0, select: false },
@@ -38,6 +40,7 @@ const userSchema = new mongoose.Schema(
         delete ret.addressWriteSeq;
         delete ret.uploadIssueSeq;
         delete ret.orderCreateSeq;
+        delete ret.pushTokens;
         return ret;
       },
     },
@@ -46,5 +49,7 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
+// Registering a token removes it from every other account.
+userSchema.index({ "pushTokens.token": 1 });
 
 export const User = mongoose.model("User", userSchema);

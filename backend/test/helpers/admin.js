@@ -38,7 +38,7 @@ export const signInAdmin = async (app, options) => {
 export const adminApi = (app, token) => {
   const call = (method) => (path) =>
     request(app)[method](`${ADMIN_API}${path}`).set("Authorization", `Bearer ${token}`);
-  return { get: call("get"), post: call("post"), patch: call("patch") };
+  return { get: call("get"), post: call("post"), patch: call("patch"), delete: call("delete") };
 };
 
 export const adminRefresh = (app, refreshToken) =>

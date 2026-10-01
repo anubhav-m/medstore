@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { env } from "../../config/env.js";
 import { AppError } from "../../utils/AppError.js";
+import { removeAllPushTokens, removePushToken } from "../notifications/pushToken.service.js";
 import { User } from "../users/user.model.js";
 import { toAuthUser } from "../users/user.service.js";
 import { RefreshToken, SubjectKind } from "./refreshToken.model.js";
@@ -68,11 +69,15 @@ export const verifyAccessToken = (authorization, subjectKind) => {
   return sub;
 };
 
-export const revokeAllSessions = (subjectKind, subjectId) =>
-  RefreshToken.updateMany(
+// Devices signed out this way also stop receiving notifications; the current device re-registers
+// its push token after a password change.
+export const revokeAllSessions = async (subjectKind, subjectId) => {
+  await RefreshToken.updateMany(
     { subjectKind, subjectId, revokedAt: null },
     { $set: { revokedAt: new Date() } },
   );
+  await removeAllPushTokens(subjectKind, subjectId);
+};
 
 // One conditional update; reuse of an already-rotated token means it was copied, so every
 // session of that subject is revoked. Returns the subject id.
@@ -90,12 +95,21 @@ export const rotateRefreshToken = async (token, subjectKind) => {
   throw invalidToken();
 };
 
-// Scoped by kind, so one world's logout can never revoke the other's tokens.
-export const revokeRefreshToken = (token, subjectKind) =>
-  RefreshToken.updateOne(
-    { tokenHash: hashToken(token), subjectKind, revokedAt: null },
+// Scoped by kind, so one world's logout can never revoke the other's tokens. The push token is
+// removed only from the account the refresh token was issued to (even if it is already revoked,
+// e.g. by a password change elsewhere), so nobody can remove another account's token this way.
+export const logout = async (subjectKind, { refreshToken, pushToken }) => {
+  const session = await RefreshToken.findOne(
+    { tokenHash: hashToken(refreshToken), subjectKind },
+    { subjectId: 1 },
+  ).lean();
+  if (!session) return;
+  await RefreshToken.updateOne(
+    { _id: session._id, revokedAt: null },
     { $set: { revokedAt: new Date() } },
   );
+  if (pushToken) await removePushToken(subjectKind, session.subjectId, pushToken);
+};
 
 export const issueCustomerSession = async (user) => ({
   ...(await issueTokens(SubjectKind.CUSTOMER, user._id)),

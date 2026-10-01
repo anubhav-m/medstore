@@ -22,3 +22,13 @@ export const istDayStart = (now) => new Date(`${istDateString(now)}T00:00:00.000
 export const istMinutesOfDay = (now) => Math.floor((now - istDayStart(now)) / MINUTE_MS);
 
 export const addMinutes = (date, minutes) => new Date(date.getTime() + minutes * MINUTE_MS);
+
+const IST_TIME = new Intl.DateTimeFormat("en-IN", {
+  timeZone: "Asia/Kolkata",
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+
+// e.g. "6:30 pm": the IST wall-clock time of `date`, for notification texts.
+export const istTimeString = (date) => IST_TIME.format(date);

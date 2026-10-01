@@ -85,7 +85,7 @@ export const refresh = async (req, res, next) => {
 
 export const logout = async (req, res, next) => {
   try {
-    await sessionService.revokeRefreshToken(req.validated.body.refreshToken, SubjectKind.CUSTOMER);
+    await sessionService.logout(SubjectKind.CUSTOMER, req.validated.body);
     return sendSuccess(res, { message: "Signed out" });
   } catch (error) {
     return next(error);

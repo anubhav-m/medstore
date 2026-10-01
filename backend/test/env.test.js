@@ -91,6 +91,14 @@ describe("parseEnv", () => {
     expect(message).not.toContain(valid[other]);
   });
 
+  it.each([
+    ["missing", undefined, undefined],
+    ["empty", "", undefined],
+    ["set", "expo-access-token", "expo-access-token"],
+  ])("treats an EXPO_ACCESS_TOKEN that is %s as optional", (_label, value, expected) => {
+    expect(parseEnv({ ...valid, EXPO_ACCESS_TOKEN: value }).EXPO_ACCESS_TOKEN).toBe(expected);
+  });
+
   it("accepts a bare EMAIL_FROM address", () => {
     expect(parseEnv({ ...valid, EMAIL_FROM: "no-reply@example.com" }).EMAIL_FROM).toBe(
       "no-reply@example.com",

@@ -11,6 +11,7 @@ import { Address } from "../addresses/address.model.js";
 import { addressNotFound } from "../addresses/address.service.js";
 import { findStoreForPin, deliversTo, toDistanceKm } from "../stores/store.service.js";
 import { isStoreOpen } from "../stores/storeHours.js";
+import { notifyOrderPlaced } from "../notifications/orderNotifications.js";
 import { Upload } from "../uploads/upload.model.js";
 import { User } from "../users/user.model.js";
 import { nextOrderNumber } from "./counter.model.js";
@@ -74,13 +75,14 @@ const copyAddress = ({ label, line1, line2, landmark, city, pincode, location })
 // Check 6 and the insert. Bumping the user document first makes concurrent creates of one
 // customer conflict, so the transaction driver retries them one at a time: the open-order count
 // stays exact, and a request that lost the race on the same idempotency key finds the winner's
-// order here instead of creating another.
+// order here instead of creating another. Staff hear only about an order this call created,
+// once the transaction has committed.
 const insertOrder = async ({ userId, idempotencyKey, imagePaths, now, ...fields }) => {
   const orderNumber = await nextOrderNumber(fields.store.code);
-  return mongoose.connection.transaction(async (session) => {
+  const { order, created } = await mongoose.connection.transaction(async (session) => {
     await User.updateOne({ _id: userId }, { $inc: { orderCreateSeq: 1 } }, { session });
     const existing = await findByIdempotencyKey(userId, idempotencyKey, session);
-    if (existing) return existing;
+    if (existing) return { order: existing, created: false };
 
     const open = await Order.countDocuments(
       { userId, status: { $in: OPEN_ORDER_STATUSES } },
@@ -94,7 +96,7 @@ const insertOrder = async ({ userId, idempotencyKey, imagePaths, now, ...fields 
       );
     }
 
-    const [order] = await Order.create(
+    const [inserted] = await Order.create(
       [
         {
           orderNumber,
@@ -127,8 +129,10 @@ const insertOrder = async ({ userId, idempotencyKey, imagePaths, now, ...fields 
       { $set: { attachedAt: now } },
       { session },
     );
-    return order.toObject();
+    return { order: inserted.toObject(), created: true };
   });
+  if (created) notifyOrderPlaced(order);
+  return order;
 };
 
 export const createOrder = async (userId, idempotencyKey, input) => {

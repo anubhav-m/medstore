@@ -273,7 +273,13 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 | Bill expired (system cancel) | Customer + staff of that store + owners |
 
 - Push text may contain the order number, status and total — never items, patient names, notes or addresses. The payload `data` is `{ orderId, event }`. Texts are listed in `backend/CLAUDE.md`.
-- Customers and admins both register push tokens, per device. A token is removed on logout (the logout request carries the device's token) and deleted when Expo reports `DeviceNotRegistered`.
+- The payload's `event` is a `NotificationEvent` from `shared`. Recipients "staff of that store + owners" means **active** admins: `STAFF` whose `storeIds` include the order's store, and every `OWNER`. Staff of other stores and disabled admins get nothing.
+- Pushes go out after the write has committed, without the request waiting. A failed push or recipient lookup is logged (ids only) and never changes the response.
+- Customers and admins both register push tokens, per device:
+  - Tokens must pass the Expo SDK's push-token check. An account keeps its newest 10 (`MAX_PUSH_TOKENS_PER_ACCOUNT`); registering another drops the oldest, and re-registering one makes it the newest.
+  - **A device token belongs to one account**: registering it removes it from every other customer and admin, so a shared phone never shows the previous account's notifications.
+  - A token is removed on logout (the logout request carries the device's token; it is removed only from the account the refresh token belongs to) and deleted when Expo reports `DeviceNotRegistered`.
+  - **Revoking all of an account's sessions also deletes all its push tokens** (decided by the user): password reset or change, admin disable or password reset by script, refresh-token reuse, account deletion. The apps re-register their token after every sign-in and after a password change.
 
 ### 3.7 Maps & Google cost
 - Allowed Google usage: **Maps SDK for Android** (map display via react-native-maps) and **Google Sign-In**. Nothing else without asking — no Places, Geocoding, Distance Matrix or Routes APIs.
@@ -290,6 +296,7 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 | Saved addresses per customer | 10 |
 | Upload URLs per customer | 20 per hour, 30 per IST day |
 | Order creations + reorders per customer | 10 per hour |
+| Push tokens per customer or admin account | 10 (the oldest is dropped) |
 | Code resend | 60 s cooldown, 5 per email per hour; 5 attempts per code; 10-minute expiry |
 | Login attempts | customer: 10 per 15 min per IP+email; admin: 5 failed per 15 min per username, plus 20 failed per 15 min per IP (shared with admin change-password) |
 | Email | ≤ 254 chars, trimmed and lowercased |

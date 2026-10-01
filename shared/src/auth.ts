@@ -45,6 +45,8 @@ export interface RefreshRequest {
 
 export interface LogoutRequest {
   refreshToken: string;
+  /** This device's Expo push token; removed from the signed-out account */
+  pushToken?: string;
 }
 
 export interface AuthUser {

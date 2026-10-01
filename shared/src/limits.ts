@@ -20,6 +20,8 @@ export const PATIENT_NAME_MAX_LENGTH = 100;
 export const REASON_NOTE_MAX_LENGTH = 300;
 // Prescription photos are viewed through signed URLs valid for at most this long.
 export const SIGNED_VIEW_URL_TTL_SECONDS = 600;
+// Push tokens per customer or admin account (one per device); the oldest is dropped beyond it.
+export const MAX_PUSH_TOKENS_PER_ACCOUNT = 10;
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_PAGE_SIZE = 100;
 
