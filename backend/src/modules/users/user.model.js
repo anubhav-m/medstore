@@ -21,6 +21,9 @@ const userSchema = new mongoose.Schema(
     // Bumped first inside every address-write transaction, so concurrent address writes for one
     // customer conflict and run one at a time (address cap, single default).
     addressWriteSeq: { type: Number, default: 0, select: false },
+    // Bumped first when issuing an upload URL, so concurrent requests run one at a time and the
+    // hourly and daily upload limits stay exact.
+    uploadIssueSeq: { type: Number, default: 0, select: false },
   },
   {
     timestamps: true,
@@ -30,6 +33,7 @@ const userSchema = new mongoose.Schema(
         delete ret.passwordHash;
         delete ret.googleId;
         delete ret.addressWriteSeq;
+        delete ret.uploadIssueSeq;
         return ret;
       },
     },

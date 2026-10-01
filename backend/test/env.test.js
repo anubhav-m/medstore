@@ -13,6 +13,9 @@ const valid = {
   GOOGLE_WEB_CLIENT_ID: "1234-abc.apps.googleusercontent.com",
   EMAIL_API_KEY: "re_example_key",
   EMAIL_FROM: "MedStore <no-reply@example.com>",
+  SUPABASE_URL: "https://abcdefghijklmnop.supabase.co",
+  SUPABASE_SECRET_KEY: "sb_secret_example-key",
+  SUPABASE_BUCKET: "prescriptions",
 };
 
 const errorMessage = (source) => {
@@ -56,6 +59,13 @@ describe("parseEnv", () => {
     ["GOOGLE_WEB_CLIENT_ID", "not-a-client-id"],
     ["EMAIL_FROM", "MedStore"],
     ["EMAIL_FROM", "MedStore <no-reply>"],
+    ["SUPABASE_URL", "http://abcdefghijklmnop.supabase.co"],
+    ["SUPABASE_URL", "abcdefghijklmnop.supabase.co"],
+    ["SUPABASE_URL", "https://abcdefghijklmnop.supabase.co/rest/v1/"],
+    ["SUPABASE_SECRET_KEY", "sb_publishable_example-key"],
+    ["SUPABASE_SECRET_KEY", "eyJhbGciOiJIUzI1NiJ9.anon-key.signature"],
+    ["SUPABASE_BUCKET", "Prescriptions"],
+    ["SUPABASE_BUCKET", "my/bucket"],
   ])("rejects malformed %s (%j) without echoing the value", (key, value) => {
     const message = errorMessage({ ...valid, [key]: value });
     expect(message).toContain(key);

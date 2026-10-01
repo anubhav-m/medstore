@@ -231,7 +231,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ### Rate limits
 
-Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `adminLogin` (per username, failed only) and `adminLoginIp` (per IP, failed only; admin login and change-password). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
+Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `adminLogin` (per username, failed only) and `adminLoginIp` (per IP, failed only; admin login and change-password). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. The per-email code-send and per-customer upload-URL limits are **domain limits** (numbers in `@medstore/shared`), counted from the database in `otp.service.js` and `upload.service.js`, not `express-rate-limit` — the upload day is the IST calendar day, which a rolling window can't express. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
 
 ## 7. API surface
 
@@ -261,7 +261,7 @@ Customer — `/api/v1`:
 | `PATCH /addresses/:id` † | any of the create fields (`lat` + `lng` together; `null` clears `line2` / `landmark`; `isDefault` only `true`) → `{ address }` | `ADDRESS_NOT_FOUND` |
 | `DELETE /addresses/:id` † | promotes the newest remaining address if the default is deleted | `ADDRESS_NOT_FOUND` |
 | `GET /stores?addressId=` † | `{ stores: CustomerStore[] }`: active stores nearest first (`$geoNear` from the address pin) with public fields only (`id`, `name`, `address`, `phone`, hours, `deliveryFeePaise`) plus `distanceKm` (1 decimal), `deliversToAddress`, `isOpen`, `nextOpensAt`; not paginated | `ADDRESS_NOT_FOUND` |
-| `POST /uploads/prescriptions` † | `{ contentType, sizeBytes }` → `{ path, signedUrl, token }` | `ACCOUNT_BLOCKED`, `UPLOAD_LIMIT_REACHED` |
+| `POST /uploads/prescriptions` † | `{ contentType, sizeBytes }` (strict: no path, file name or folder) → `{ path, signedUrl, token }` | `ACCOUNT_BLOCKED`, `UPLOAD_LIMIT_REACHED`, `SERVICE_UNAVAILABLE` (signing failed) |
 | `POST /orders` † | `Idempotency-Key` header | `ACCOUNT_BLOCKED`, `ADDRESS_NOT_FOUND`, `STORE_NOT_FOUND`, `STORE_NOT_ACCEPTING_ORDERS`, `STORE_CLOSED`, `OUTSIDE_DELIVERY_AREA`, `INVALID_UPLOAD`, `TOO_MANY_OPEN_ORDERS` |
 | `GET /orders?scope=active\|past&page=` † | paginated; no image URLs | — |
 | `GET /orders/:id` † | includes signed `imageUrls` | `ORDER_NOT_FOUND` |
@@ -309,7 +309,8 @@ users          email (lowercase), emailVerified, passwordHash (select: false; nu
                pushTokens[{ token, createdAt }], orderCreateSeq (written inside the order-creation
                transaction so concurrent creates conflict — root 3.4 check 6),
                addressWriteSeq (select: false; $inc'd first in every address-write transaction so
-               one customer's address writes run one at a time — cap and single default stay exact)
+               one customer's address writes run one at a time — cap and single default stay exact),
+               uploadIssueSeq (select: false; $inc'd first when issuing an upload URL — limits stay exact)
 addresses      userId, label, line1 (house/flat), line2?, landmark?, city, pincode, location, isDefault
 stores         code (immutable), name, address { line1, line2?, city, pincode }, phone, location, deliveryRadiusKm,
                openingMinutes, closingMinutes, deliveryFeePaise, isAcceptingOrders, isActive
@@ -325,7 +326,8 @@ orders         orderNumber, userId, storeId, status, idempotencyKey, reorderedFr
                paymentMethod ("COD"), paymentStatus (PENDING | COLLECTED), cashCollectedPaise?,
                deliveredAt?, rejection? { code, note }, cancellation? { byKind, code, note },
                deliveryFailure? { code, note }, statusHistory[{ status, at, by { kind, id? }, note? }]
-uploads        userId, path, contentType, sizeBytes, attachedAt? (set when first used by an order)
+uploads        userId, path, contentType, sizeBytes (as declared), attachedAt? (set when first used by an
+               order — added with orders)
 refreshTokens  tokenHash, subjectKind (CUSTOMER | ADMIN), subjectId, expiresAt, revokedAt?, rotatedAt?
 otpCodes       userId, purpose (VERIFY_EMAIL | RESET_PASSWORD), codeHash (HMAC), attempts, expiresAt
 codeSends      email, purpose — one per code-send request, kept 1 hour (per-email send limits)
@@ -341,7 +343,7 @@ counters       _id (store code), seq — never reset
   - `stores`: `code` unique; `location` 2dsphere
   - `addresses`: `{ userId, createdAt: -1 }`; `userId` unique with `partialFilterExpression: { isDefault: true }` (at most one default, enforced by the database)
   - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks)
-  - `uploads`: `path` unique; `{ userId, createdAt }`; `{ attachedAt, createdAt }` (cleanup job)
+  - `uploads`: `path` unique; `{ userId, createdAt }`; `{ attachedAt, createdAt }` (cleanup job — added with it)
   - `refreshTokens`: `tokenHash` unique; `{ subjectKind, subjectId }`; TTL on `expiresAt`
   - `otpCodes`: `{ userId, purpose }` unique; TTL on `expiresAt`
   - `codeSends`: `{ email, createdAt }`; TTL of 1 hour on `createdAt`
@@ -356,10 +358,15 @@ counters       _id (store code), seq — never reset
 ## 9. Integrations
 
 - **Storage** (`services/storage.js`) — Supabase Storage through `@supabase/supabase-js`, used for storage only:
-  - Create one server-side client with the **secret key** (never the publishable/anon key) and `auth: { persistSession: false, autoRefreshToken: false }`. It lives only in `services/storage.js`.
-  - Bucket setup is code, not dashboard clicks: `npm run storage:setup` creates or updates the `SUPABASE_BUCKET` bucket as **private**, with a 5 MB file size limit and allowed MIME types `image/jpeg` and `image/png`. It is safe to run repeatedly.
+  - Create one server-side client with the **secret key** (`sb_secret_…`, enforced by `env.js`; never the publishable/anon key) and `auth: { persistSession: false, autoRefreshToken: false }`, plus a `global.fetch` with a 10 s timeout. It lives only in `services/storage.js`.
+  - Every Supabase failure (returned `error` or thrown) becomes `503 SERVICE_UNAVAILABLE`; the log carries the operation, provider status and message — never the key, a signed URL or a token.
+  - Bucket setup is code, not dashboard clicks: `npm run storage:setup` creates or updates the `SUPABASE_BUCKET` bucket as **private**, with a 5 MB file size limit and allowed MIME types `image/jpeg` and `image/png`. It is safe to run repeatedly. It finds the bucket with `listBuckets({ search })` + an exact id match (search is a substring match), calls `createBucket` or `updateBucket`, then reads it back with `getBucket` and exits non-zero naming any setting that didn't apply. It prints the project host and bucket and asks no confirmation (it only ever applies the same settings).
   - Upload: validate the requested content type and byte size, build the path `` `${userId}/${crypto.randomUUID()}.${ext}` `` on the server (a template string — never `node:path`; never accept a path from the client), record it in `uploads`, then return `createSignedUploadUrl(path)`.
-  - Order creation: each path must match the exact pattern `^{userId}/{uuid}\.(jpg|png)$`, exist in `uploads` for this customer, and exist in storage with an allowed type and size. Look up the installed storage-js API for reading one object's metadata — don't guess a method name, and don't rely on `list()` over the whole folder (it is paginated, so it breaks for customers with many uploads).
+    - The blocked check, both limit counts (last hour; since IST midnight) and the insert run in one transaction that first bumps `users.uploadIssueSeq`. Signing runs after the commit (no lock held across a network call); if it fails, the record is deleted so the attempt doesn't count.
+    - Signed upload URLs are valid for **2 hours** (fixed by Supabase) and allow one upload to that path: no `upsert`, so an object is never overwritten.
+  - Order creation: each path must match the exact pattern `^{userId}/{uuid}\.(jpg|png)$`, exist in `uploads` for this customer, and exist in storage with an allowed type and size.
+    - Verified against the real bucket: it checks only the uploader's `Content-Type` **header**, never the bytes (a text file sent as `image/jpeg` is stored), and the header may disagree with the path's extension (a `.jpg` path can be stored as `image/png`). So the stored object's content type must equal the one recorded in `uploads` for that path.
+    - **Signature check (decided by the user):** the object's first bytes must match its type: JPEG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`; otherwise `INVALID_UPLOAD`. Read only those bytes, never the whole image: a short-lived signed view URL fetched with `Range: bytes=0-7` returns `206` with just those bytes (verified against the real bucket). This runs for new orders and for reorders (check 5). Image bytes are never logged. Look up the installed storage-js API for reading one object's metadata — don't guess a method name, and don't rely on `list()` over the whole folder (it is paginated, so it breaks for customers with many uploads).
   - Viewing: `createSignedUrls` for all of an order's images in one call, lifetime ≤ 600 s.
   - No Storage RLS policies: nothing reaches the bucket except this service and the signed URLs it issues. Never make the bucket public.
   - Tests mock `services/storage.js`; they never call Supabase.
@@ -396,7 +403,7 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 
 - `helmet()`, `x-powered-by` disabled, 100 kb body limit (no files pass through the API), rate limiting.
 - **CORS**: native apps are not subject to CORS, so no CORS middleware is installed. If a web client is added later, add an allow-list from a new env var — never bare `cors()`.
-- Pino + `pino-http` (`quietReqLogger`/`quietResLogger`, so `req.log` is bound to `reqId` only) with a request id on every line. Request logs record method, **route pattern** (`req.baseUrl + req.route.path` captured by `recordRoutePattern` when the router matches — Express resets `baseUrl` before a failed request is logged — or `unmatched`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, codes, phone, address, patient name, notes and bill items (top level and up to two levels deep). `code` is redacted **only** under `req.body` / `body` (OTP codes) — elsewhere it carries error codes that logs must keep. No `console.*`.
+- Pino + `pino-http` (`quietReqLogger`/`quietResLogger`, so `req.log` is bound to `reqId` only) with a request id on every line. Request logs record method, **route pattern** (`req.baseUrl + req.route.path` captured by `recordRoutePattern` when the router matches — Express resets `baseUrl` before a failed request is logged — or `unmatched`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, signed URLs, codes, phone, address, patient name, notes and bill items (top level and up to two levels deep). `code` is redacted **only** under `req.body` / `body` (OTP codes) — elsewhere it carries error codes that logs must keep. No `console.*`.
 - `GET /health` reports process + DB readiness as `{ status, db }` — no versions, hostnames or error details.
 - Graceful shutdown on `SIGTERM`/`SIGINT`: stop accepting connections, clear jobs, finish in-flight requests, close Mongo, exit (with a hard timeout). Windows has no `SIGTERM` — test shutdown locally with Ctrl+C (`SIGINT`); `node --watch` restarts without running the handler.
 
@@ -429,7 +436,7 @@ BILL_CONFIRMATION_TIMEOUT_MINUTES     # 60 in .env.example
 
 All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
 
-**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
+**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend), `SUPABASE_URL` (the bare https project URL — no `/rest/v1` or other path), `SUPABASE_SECRET_KEY` (must start with `sb_secret_`), `SUPABASE_BUCKET` (lowercase bucket name; `prescriptions`). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
 
 Local development uses a separate Atlas dev cluster (or Docker `mongo` started with `--replSet rs0`). A MongoDB installed as a Windows service starts standalone; it needs `replication.replSetName` in `mongod.cfg` and a one-time `rs.initiate()` before transactions work.
 

@@ -18,6 +18,7 @@ describe("logger redaction", () => {
       password: "hunter22",
       user: { refreshToken: "refresh-secret", phone: "+919876543210" },
       order: { patientName: "Asha", deliveryAddress: { line1: "12 MG Road" } },
+      upload: { signedUrl: "https://x.supabase.co/storage/v1/object/upload/sign/p?token=t" },
     });
 
     expect(logged.req.headers.authorization).toBe("[REDACTED]");
@@ -28,6 +29,7 @@ describe("logger redaction", () => {
     expect(logged.user.phone).toBe("[REDACTED]");
     expect(logged.order.patientName).toBe("[REDACTED]");
     expect(logged.order.deliveryAddress).toBe("[REDACTED]");
+    expect(logged.upload.signedUrl).toBe("[REDACTED]");
   });
 
   it("redacts auth request bodies: passwords, codes and tokens", () => {

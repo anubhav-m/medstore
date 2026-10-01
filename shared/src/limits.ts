@@ -1,6 +1,10 @@
 export const MAX_ORDER_IMAGES = 5;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png"] as const;
+export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
+// Signed upload URLs issued per customer; the day is the IST calendar day.
+export const UPLOAD_URLS_PER_HOUR = 20;
+export const UPLOAD_URLS_PER_IST_DAY = 30;
 export const MAX_BILL_ITEMS = 50;
 export const MAX_OPEN_ORDERS = 3;
 export const CUSTOMER_NOTE_MAX_LENGTH = 500;

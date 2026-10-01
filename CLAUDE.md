@@ -182,7 +182,7 @@ Then the server checks in this order and fails with the first matching code:
 2. Address belongs to the customer → `ADDRESS_NOT_FOUND`
 3. Store exists → `STORE_NOT_FOUND`; is active and accepting orders → `STORE_NOT_ACCEPTING_ORDERS`; within hours → `STORE_CLOSED`
 4. Address is within the store's radius → `OUTSIDE_DELIVERY_AREA`
-5. Every image path matches `{userId}/{uuid}.{jpg|png}` exactly, was issued to this customer, and exists in storage with an allowed type and size → `INVALID_UPLOAD`
+5. Every image path matches `{userId}/{uuid}.{jpg|png}` exactly, was issued to this customer, and exists in storage with an allowed type and size, the type it was issued for, and a real JPEG/PNG file signature in its first bytes (the bucket only checks the uploader's header) → `INVALID_UPLOAD`
 6. Fewer than 3 non-terminal orders across all stores → `TOO_MANY_OPEN_ORDERS`. Check 6 and the insert run in **one transaction that first writes the customer's user document**, so two simultaneous orders can't both pass.
 
 On success: status `PENDING_REVIEW`, an order number is assigned, the address is **copied** into the order (with location and `distanceKm`), the customer's name and phone are copied in (staff search and call with them), the store's current `deliveryFeePaise` is copied in, and staff are notified.

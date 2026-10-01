@@ -15,10 +15,13 @@ export default defineConfig({
       GOOGLE_WEB_CLIENT_ID: "test-client.apps.googleusercontent.com",
       EMAIL_API_KEY: "test-email-api-key",
       EMAIL_FROM: "MedStore <no-reply@example.com>",
+      SUPABASE_URL: "https://test-project.supabase.co",
+      SUPABASE_SECRET_KEY: "sb_secret_test-key",
+      SUPABASE_BUCKET: "prescriptions",
     },
     globalSetup: ["./test/globalSetup.js"],
     setupFiles: ["./test/setup.js"],
-    // Mocked services (email, Google) start every test with no calls and no queued results.
+    // Mocked services (email, Google, storage) start every test with no calls and no queued results.
     mockReset: true,
     // The first run downloads a mongod binary, which is slow on Windows.
     hookTimeout: 120_000,

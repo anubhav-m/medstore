@@ -11,6 +11,8 @@ const SENSITIVE_KEYS = [
   "idToken",
   "googleIdToken",
   "pushToken",
+  // Signed upload URLs carry their token in the query string.
+  "signedUrl",
   "phone",
   "customerPhone",
   "address",

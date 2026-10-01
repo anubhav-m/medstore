@@ -1,7 +1,8 @@
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
 
 // The only place rate-limit numbers live; createApp accepts overrides so tests can use low limits.
-// Per-email code-send limits are domain limits (root 3.8) enforced in otp.service.js.
+// Per-email code-send limits and per-customer upload-URL limits are domain limits (root 3.8, in
+// @medstore/shared) enforced in otp.service.js and upload.service.js.
 export const rateLimits = {
   global: { windowMs: FIFTEEN_MINUTES, limit: 300 },
   // register, google, resend-code, forgot-password — per IP

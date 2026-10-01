@@ -12,10 +12,12 @@
     "admin:disable": "node --env-file=.env scripts/admin-disable.js",
     "admin:enable": "node --env-file=.env scripts/admin-enable.js",
     "admin:set-stores": "node --env-file=.env scripts/admin-set-stores.js",
-    "admin:list": "node --env-file=.env scripts/admin-list.js"
+    "admin:list": "node --env-file=.env scripts/admin-list.js",
+    "storage:setup": "node --env-file=.env scripts/storage-setup.js"
   },
   "dependencies": {
     "@medstore/shared": "*",
+    "@supabase/supabase-js": "2.117.2",
     "argon2": "0.45.1",
     "express": "5.2.1",
     "express-rate-limit": "8.7.0",

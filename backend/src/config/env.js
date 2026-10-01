@@ -36,6 +36,17 @@ const envSchema = z
     EMAIL_FROM: z
       .string()
       .regex(EMAIL_FROM_PATTERN, 'must be "address@domain" or "Name <address@domain>"'),
+    // The bare project URL; the dashboard also shows URLs with /rest/v1 etc., which break storage.
+    SUPABASE_URL: z
+      .url({ protocol: /^https$/, error: "must be an https:// URL" })
+      .refine((url) => /^https:\/\/[^/]+\/?$/.test(url), "must be the project URL without a path"),
+    // Publishable keys are bundled into apps; only a secret key may sign storage URLs.
+    SUPABASE_SECRET_KEY: z
+      .string()
+      .regex(/^sb_secret_\S+$/, 'must be a Supabase secret key ("sb_secret_…")'),
+    SUPABASE_BUCKET: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9_-]{1,62}$/, "must be a lowercase bucket name"),
   })
   .superRefine((env, ctx) => {
     // A shared secret would let a token or code from one world pass as another.
