@@ -1,4 +1,5 @@
 const FIFTEEN_MINUTES = 15 * 60 * 1000;
+const ONE_HOUR = 60 * 60 * 1000;
 
 // The only place rate-limit numbers live; createApp accepts overrides so tests can use low limits.
 // Per-email code-send limits and per-customer upload-URL limits are domain limits (root 3.8, in
@@ -15,4 +16,6 @@ export const rateLimits = {
   adminLogin: { windowMs: FIFTEEN_MINUTES, limit: 5 }, // per username
   adminLoginIp: { windowMs: FIFTEEN_MINUTES, limit: 20 }, // per IP
   refresh: { windowMs: FIFTEEN_MINUTES, limit: 30 },
+  // Order creations + reorders, per customer (root 3.8)
+  orderCreate: { windowMs: ONE_HOUR, limit: 10 },
 };

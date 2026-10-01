@@ -172,9 +172,9 @@ Reports are **owner-only**. Admins are created and managed only with the backend
 
 ### 3.4 Orders
 
-**Creation** (customer): 1–5 photos (JPEG/PNG, ≤ 5 MB each), optional patient name (defaults to the customer's name), optional note (≤ 500 chars), one of their saved addresses, a store, and an `Idempotency-Key` header (a UUID).
+**Creation** (customer): 1–5 distinct photos (JPEG/PNG, ≤ 5 MB each; the same path twice is a `400 VALIDATION_ERROR`), optional patient name (defaults to the customer's name), optional note (≤ 500 chars), one of their saved addresses, a store, and an `Idempotency-Key` header (a UUID).
 
-**Idempotency comes first.** Before any other check, the server looks up `(userId, Idempotency-Key)`. If an order exists, it is returned as-is — whatever the body and whatever the store's current state. If a concurrent request with the same key wins the insert, the loser returns that order too.
+**Idempotency comes first.** Before any other check, the server looks up `(userId, Idempotency-Key)` (the key is a UUID, compared lowercase). If an order exists, it is returned as-is — whatever the body and whatever the store's current state; there is no body hash and no "key reused" error. If a concurrent request with the same key wins the insert, the loser returns that order too: the lookup is repeated inside the creation transaction (check 6), after the user-document write that serialises one customer's creates.
 
 Then the server checks in this order and fails with the first matching code:
 
@@ -183,7 +183,7 @@ Then the server checks in this order and fails with the first matching code:
 3. Store exists → `STORE_NOT_FOUND`; is active and accepting orders → `STORE_NOT_ACCEPTING_ORDERS`; within hours → `STORE_CLOSED`
 4. Address is within the store's radius → `OUTSIDE_DELIVERY_AREA`
 5. Every image path matches `{userId}/{uuid}.{jpg|png}` exactly, was issued to this customer, and exists in storage with an allowed type and size, the type it was issued for, and a real JPEG/PNG file signature in its first bytes (the bucket only checks the uploader's header) → `INVALID_UPLOAD`
-6. Fewer than 3 non-terminal orders across all stores → `TOO_MANY_OPEN_ORDERS`. Check 6 and the insert run in **one transaction that first writes the customer's user document**, so two simultaneous orders can't both pass.
+6. Fewer than 3 non-terminal orders across all stores → `TOO_MANY_OPEN_ORDERS`. Check 6 and the insert run in **one transaction that first writes the customer's user document** (`$inc orderCreateSeq`), so two simultaneous orders can't both pass. The limit is **counted** from the orders in that transaction — there is no stored open-order counter, so transitions into terminal statuses touch only the order.
 
 On success: status `PENDING_REVIEW`, an order number is assigned, the address is **copied** into the order (with location and `distanceKm`), the customer's name and phone are copied in (staff search and call with them), the store's current `deliveryFeePaise` is copied in, and staff are notified.
 
@@ -205,11 +205,12 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 
 "staff" means `STAFF` of that order's store, or `OWNER`. Terminal statuses: `REJECTED`, `CANCELLED`, `DELIVERED`, `DELIVERY_FAILED`.
 
-- A transition not in the table → `409 INVALID_ORDER_TRANSITION`.
+- Every status change goes through one function, `transitionOrder` (`backend/src/modules/orders/orderTransition.js`) — customer, admin and system actions alike.
+- A transition not in the table, or by the wrong actor → `409 INVALID_ORDER_TRANSITION`.
 - Every transition is **one conditional update** matching the expected current status (plus `billVersion` and `billExpiresAt > now` for confirm, and the expected `billVersion` for a revision) that also pushes a `statusHistory` entry `{ status, at, by: { kind, id }, note }` (`kind` is `CUSTOMER`, `ADMIN` or `SYSTEM`; customers see only `kind`, never an admin's id). If nothing matched, re-read the order to classify: someone else got there first → `409 ORDER_STATUS_CHANGED`; the bill changed → `409 BILL_CHANGED`; the bill expired → `409 BILL_EXPIRED`.
 - Push notifications are sent after the write succeeds. A failed push never fails the request.
 
-**Reason codes** (in `shared`; display labels live in `mobile-core`). Notes are ≤ 300 chars and required when the code is `OTHER`.
+**Reason codes** (in `shared`; display labels live in `mobile-core`). Notes are ≤ 300 chars and required when the code is `OTHER`. A customer cancel note needs a reason code.
 
 | Used for | Codes |
 |---|---|

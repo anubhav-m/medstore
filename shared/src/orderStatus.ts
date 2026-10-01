@@ -19,6 +19,11 @@ export const TERMINAL_ORDER_STATUSES: readonly OrderStatus[] = [
   OrderStatus.DELIVERY_FAILED,
 ];
 
+// Non-terminal: counted toward MAX_OPEN_ORDERS and listed under a customer's active orders.
+export const OPEN_ORDER_STATUSES: readonly OrderStatus[] = Object.values(OrderStatus).filter(
+  (status) => !TERMINAL_ORDER_STATUSES.includes(status),
+);
+
 // STAFF means staff of the order's store, or an OWNER.
 export const TransitionActor = {
   CUSTOMER: "CUSTOMER",

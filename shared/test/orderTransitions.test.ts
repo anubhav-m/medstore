@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  OPEN_ORDER_STATUSES,
   ORDER_TRANSITIONS,
   OrderAction,
   OrderStatus,
@@ -57,6 +58,13 @@ describe("ORDER_TRANSITIONS", () => {
       }
       expect(reachesTerminal, start).toBe(true);
     }
+  });
+
+  it("splits every status into open or terminal", () => {
+    expect([...OPEN_ORDER_STATUSES, ...TERMINAL_ORDER_STATUSES].sort()).toEqual(
+      [...allStatuses].sort(),
+    );
+    expect(OPEN_ORDER_STATUSES.filter((s) => TERMINAL_ORDER_STATUSES.includes(s))).toEqual([]);
   });
 
   it("lets only the customer confirm a bill", () => {

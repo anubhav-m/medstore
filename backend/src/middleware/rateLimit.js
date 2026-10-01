@@ -35,3 +35,6 @@ export const adminUsernameKey = (req) => {
   const username = req.body?.username;
   return typeof username === "string" ? username.trim().toLowerCase() : "";
 };
+
+// Per customer, for routes behind authCustomer.
+export const customerKey = (req) => req.user.id;

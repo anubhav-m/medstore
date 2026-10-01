@@ -10,6 +10,8 @@ const uploadSchema = new mongoose.Schema(
     contentType: { type: String, enum: [...ALLOWED_IMAGE_TYPES], required: true },
     // As declared by the app; the stored object's real size is checked when an order uses it.
     sizeBytes: { type: Number, required: true },
+    // Set when an order first uses the path; unattached uploads are cleaned up later.
+    attachedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );

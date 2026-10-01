@@ -1,4 +1,5 @@
 import { ErrorCodes } from "@medstore/shared";
+import mongoose from "mongoose";
 import { AppError } from "../../utils/AppError.js";
 import { fromPoint, toPoint } from "../../utils/geo.js";
 import { Address } from "../addresses/address.model.js";
@@ -31,7 +32,13 @@ const toAdminStore = (store) => ({
   updatedAt: store.updatedAt,
 });
 
-// Public fields only. Eligibility uses the exact distance; only the displayed value is rounded.
+// `store.distanceMeters` comes from $geoNear. Eligibility uses the exact distance; only the
+// displayed (and copied) value is rounded to one decimal.
+export const deliversTo = (store) => store.distanceMeters <= store.deliveryRadiusKm * 1000;
+
+export const toDistanceKm = (meters) => Math.round(meters / 100) / 10;
+
+// Public fields only.
 const toCustomerStore = (store, now) => ({
   id: String(store._id),
   name: store.name,
@@ -40,8 +47,8 @@ const toCustomerStore = (store, now) => ({
   openingMinutes: store.openingMinutes,
   closingMinutes: store.closingMinutes,
   deliveryFeePaise: store.deliveryFeePaise,
-  distanceKm: Math.round(store.distanceMeters / 100) / 10,
-  deliversToAddress: store.distanceMeters <= store.deliveryRadiusKm * 1000,
+  distanceKm: toDistanceKm(store.distanceMeters),
+  deliversToAddress: deliversTo(store),
   isOpen: isStoreOpen(store, now),
   nextOpensAt: nextOpensAt(store, now),
 });
@@ -78,6 +85,23 @@ export const listStoresForAddress = async (userId, addressId) => {
   ]);
   const now = new Date();
   return stores.map((store) => toCustomerStore(store, now));
+};
+
+// One store (any state) with its straight-line distance from `point` (GeoJSON); null if it
+// doesn't exist. Aggregation stages aren't cast by Mongoose, hence the explicit ObjectId.
+export const findStoreForPin = async (storeId, point) => {
+  const [store] = await Store.aggregate([
+    {
+      $geoNear: {
+        near: point,
+        key: "location",
+        distanceField: "distanceMeters",
+        spherical: true,
+        query: { _id: new mongoose.Types.ObjectId(String(storeId)) },
+      },
+    },
+  ]);
+  return store ?? null;
 };
 
 export const listAdminStores = async (admin) => (await scopedStores(admin)).map(toAdminStore);

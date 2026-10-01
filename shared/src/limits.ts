@@ -10,6 +10,11 @@ export const MAX_OPEN_ORDERS = 3;
 export const CUSTOMER_NOTE_MAX_LENGTH = 500;
 export const PATIENT_NAME_MIN_LENGTH = 2;
 export const PATIENT_NAME_MAX_LENGTH = 100;
+export const REASON_NOTE_MAX_LENGTH = 300;
+// Prescription photos are viewed through signed URLs valid for at most this long.
+export const SIGNED_VIEW_URL_TTL_SECONDS = 600;
+export const DEFAULT_PAGE_SIZE = 20;
+export const MAX_PAGE_SIZE = 100;
 
 export const EMAIL_MAX_LENGTH = 254;
 export const CUSTOMER_PASSWORD_MIN_LENGTH = 8;

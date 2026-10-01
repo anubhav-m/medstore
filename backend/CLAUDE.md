@@ -53,6 +53,8 @@ orders/
 └── order.validation.js       # Zod schemas for both surfaces
 ```
 
+`orders/` also has, because one service file would exceed ~200 lines: `orderTransition.js` (`transitionOrder` — the only code that changes an order's status), `orderPlacement.service.js` (create + reorder: the creation checks and the creation transaction), `orderImages.js` (creation check 5), `order.view.js` (customer response shapes) and `counter.model.js` (order numbers).
+
 Each file in `services/` is the **only** place that talks to its integration (bucket, email provider, Expo push, Google). Modules call these services; they never import the SDKs directly.
 
 ## 2. Layering
@@ -172,7 +174,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ## 5. Validation
 
-- Every route validates `body`, `params`, `query` **and the headers it reads** with Zod via the `validate` middleware. Schemas are strict (unknown keys rejected; the error handler reports each unknown key as its own `field`, e.g. `address.userId`), strings trimmed, sizes bounded by the limits in root 3.8. `Idempotency-Key` is a required UUID on `POST /orders` and `POST /orders/:id/reorder`.
+- Every route validates `body`, `params`, `query` **and the headers it reads** with Zod via the `validate` middleware. Schemas are strict (unknown keys rejected; the error handler reports each unknown key as its own `field`, e.g. `address.userId`), strings trimmed, sizes bounded by the limits in root 3.8. `Idempotency-Key` is a required UUID on `POST /orders` and `POST /orders/:id/reorder` (lowercased by the schema; the field in errors is `idempotency-key`). Header schemas use `z.object`, not strict — clients send many headers.
 - Validated data goes on `req.validated`. Do not reassign `req.query` (read-only in Express 5).
 - Path params are always ObjectIds, validated with `idParamsSchema` (`utils/idParams.js`). `validate` turns a `params` failure into `400 INVALID_ID`, never `VALIDATION_ERROR`.
 - Never pass `req.body` / `req.query` straight into Mongoose. Destructure the fields you need; strict schemas also block NoSQL operator injection (`{ "$ne": null }`).
@@ -231,7 +233,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ### Rate limits
 
-Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `adminLogin` (per username, failed only) and `adminLoginIp` (per IP, failed only; admin login and change-password). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. The per-email code-send and per-customer upload-URL limits are **domain limits** (numbers in `@medstore/shared`), counted from the database in `otp.service.js` and `upload.service.js`, not `express-rate-limit` — the upload day is the IST calendar day, which a rolling window can't express. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
+Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `adminLogin` (per username, failed only), `adminLoginIp` (per IP, failed only; admin login and change-password) and `orderCreate` (10 per hour per customer, keyed by `customerKey` after `authCustomer`; one limiter instance shared by `POST /orders` and reorder). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. The per-email code-send and per-customer upload-URL limits are **domain limits** (numbers in `@medstore/shared`), counted from the database in `otp.service.js` and `upload.service.js`, not `express-rate-limit` — the upload day is the IST calendar day, which a rolling window can't express. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
 
 ## 7. API surface
 
@@ -262,12 +264,14 @@ Customer — `/api/v1`:
 | `DELETE /addresses/:id` † | promotes the newest remaining address if the default is deleted | `ADDRESS_NOT_FOUND` |
 | `GET /stores?addressId=` † | `{ stores: CustomerStore[] }`: active stores nearest first (`$geoNear` from the address pin) with public fields only (`id`, `name`, `address`, `phone`, hours, `deliveryFeePaise`) plus `distanceKm` (1 decimal), `deliversToAddress`, `isOpen`, `nextOpensAt`; not paginated | `ADDRESS_NOT_FOUND` |
 | `POST /uploads/prescriptions` † | `{ contentType, sizeBytes }` (strict: no path, file name or folder) → `{ path, signedUrl, token }` | `ACCOUNT_BLOCKED`, `UPLOAD_LIMIT_REACHED`, `SERVICE_UNAVAILABLE` (signing failed) |
-| `POST /orders` † | `Idempotency-Key` header | `ACCOUNT_BLOCKED`, `ADDRESS_NOT_FOUND`, `STORE_NOT_FOUND`, `STORE_NOT_ACCEPTING_ORDERS`, `STORE_CLOSED`, `OUTSIDE_DELIVERY_AREA`, `INVALID_UPLOAD`, `TOO_MANY_OPEN_ORDERS` |
-| `GET /orders?scope=active\|past&page=` † | paginated; no image URLs | — |
-| `GET /orders/:id` † | includes signed `imageUrls` | `ORDER_NOT_FOUND` |
-| `POST /orders/:id/confirm` † | `{ billVersion }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `BILL_CHANGED`, `BILL_EXPIRED`, `ORDER_STATUS_CHANGED` |
-| `POST /orders/:id/cancel` † | `{ reasonCode?, note? }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
-| `POST /orders/:id/reorder` † | `{ note? }` + `Idempotency-Key` header | `ORDER_NOT_FOUND`, `REORDER_NOT_ALLOWED`, `ACCOUNT_BLOCKED`, `STORE_NOT_ACCEPTING_ORDERS`, `STORE_CLOSED`, `OUTSIDE_DELIVERY_AREA`, `INVALID_UPLOAD`, `TOO_MANY_OPEN_ORDERS` |
+| `POST /orders` † | `Idempotency-Key` header; `{ storeId, addressId, imagePaths (1–5 distinct), patientName?, note? }` → `{ order: CustomerOrder }` | `ACCOUNT_BLOCKED`, `ADDRESS_NOT_FOUND`, `STORE_NOT_FOUND`, `STORE_NOT_ACCEPTING_ORDERS`, `STORE_CLOSED`, `OUTSIDE_DELIVERY_AREA`, `INVALID_UPLOAD`, `TOO_MANY_OPEN_ORDERS`, `SERVICE_UNAVAILABLE` (storage check failed) |
+| `GET /orders?scope=active\|past&page=&limit=` † | `scope` optional (both when absent); newest first; `{ orders: CustomerOrderSummary[] }` + `meta`; no image URLs | — |
+| `GET /orders/:id` † | `{ order: CustomerOrderDetail }` — `CustomerOrder` + signed `imageUrls` (600 s) | `ORDER_NOT_FOUND`, `SERVICE_UNAVAILABLE` (signing failed) |
+| `POST /orders/:id/confirm` † | `{ billVersion }` → `{ order }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `BILL_CHANGED`, `BILL_EXPIRED`, `ORDER_STATUS_CHANGED` |
+| `POST /orders/:id/cancel` † | `{ reasonCode?, note? }` (`note` needs a code; required for `OTHER`) → `{ order }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
+| `POST /orders/:id/reorder` † | `{ note? }` + `Idempotency-Key` header → `{ order }` | `ACCOUNT_BLOCKED`, `ORDER_NOT_FOUND`, `REORDER_NOT_ALLOWED`, `STORE_NOT_ACCEPTING_ORDERS`, `STORE_CLOSED`, `OUTSIDE_DELIVERY_AREA`, `INVALID_UPLOAD`, `TOO_MANY_OPEN_ORDERS`, `SERVICE_UNAVAILABLE` |
+
+Customer order responses (`order.view.js`) pick fields explicitly and never include `userId`, `idempotencyKey`, image paths, `items[].nameKey`, `customerName` / `customerPhone` or `statusHistory[].by.id`. Only `GET /orders/:id` signs image URLs; the POST endpoints return `CustomerOrder` without them, so a write never waits on Supabase.
 
 Admin — `/api/v1/admin`:
 
@@ -326,8 +330,8 @@ orders         orderNumber, userId, storeId, status, idempotencyKey, reorderedFr
                paymentMethod ("COD"), paymentStatus (PENDING | COLLECTED), cashCollectedPaise?,
                deliveredAt?, rejection? { code, note }, cancellation? { byKind, code, note },
                deliveryFailure? { code, note }, statusHistory[{ status, at, by { kind, id? }, note? }]
-uploads        userId, path, contentType, sizeBytes (as declared), attachedAt? (set when first used by an
-               order — added with orders)
+uploads        userId, path, contentType, sizeBytes (as declared), attachedAt (null until first used by an
+               order; set inside the creation transaction)
 refreshTokens  tokenHash, subjectKind (CUSTOMER | ADMIN), subjectId, expiresAt, revokedAt?, rotatedAt?
 otpCodes       userId, purpose (VERIFY_EMAIL | RESET_PASSWORD), codeHash (HMAC), attempts, expiresAt
 codeSends      email, purpose — one per code-send request, kept 1 hour (per-email send limits)
@@ -342,7 +346,7 @@ counters       _id (store code), seq — never reset
   - `admins`: `username` unique
   - `stores`: `code` unique; `location` 2dsphere
   - `addresses`: `{ userId, createdAt: -1 }`; `userId` unique with `partialFilterExpression: { isDefault: true }` (at most one default, enforced by the database)
-  - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks)
+  - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks). The expiry, suggestion, search and report indexes are added by the features that first query them.
   - `uploads`: `path` unique; `{ userId, createdAt }`; `{ attachedAt, createdAt }` (cleanup job — added with it)
   - `refreshTokens`: `tokenHash` unique; `{ subjectKind, subjectId }`; TTL on `expiresAt`
   - `otpCodes`: `{ userId, purpose }` unique; TTL on `expiresAt`
@@ -350,7 +354,9 @@ counters       _id (store code), seq — never reset
 - **Every unbounded list endpoint is paginated** (default 20, max 100). Bounded lists (addresses ≤ 10, stores) are not. Never `Model.find()` without a limit.
 - Reads use `.lean()` and projections. No N+1 loops — use `$in` or aggregation.
 - Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use a transaction (`mongoose.connection.transaction`, which retries transient conflicts) when several documents must change together: onboarding (profile + first address), address writes (user lock + count / default switch + write), order creation/reorder (user lock + count + insert + marking uploads attached) and account deletion. Local and test Mongo run as a single-node replica set.
-- Idempotency: look up `(userId, idempotencyKey)` before anything else; on a duplicate-key error for that index during insert, fetch and return the existing order.
+- Idempotency: look up `(userId, idempotencyKey)` before anything else, and again inside the creation transaction right after `$inc orderCreateSeq`. That write serialises one customer's creates, so a concurrent request with the same key finds the winner's order there and returns it (even at 2 open orders, where it would otherwise fail check 6). The unique index stays as the database-level guarantee.
+- Order numbers: `counter.model.js` `nextOrderNumber(storeCode)` — an atomic `$inc` upsert run just **before** the creation transaction (a failed create leaves a gap; inside the transaction, concurrent first upserts could fail with a non-transient duplicate key).
+- Transitions (`transitionOrder`): check the table and actor, read the order's status within `scope`, then one `findOneAndUpdate` on that exact status (+ `billVersion`, + `billExpiresAt > now` for CONFIRM) that sets the new status and `set` fields and pushes the history entry. A miss is classified by re-reading: `ORDER_STATUS_CHANGED`, then `BILL_CHANGED`, then `BILL_EXPIRED`. Single-document, so no transaction.
 - Never read-modify-write counters or statuses; use atomic operators and conditional filters.
 - Geo: store locations and address pins are GeoJSON `Point` with `[lng, lat]`. Distance/eligibility uses `$geoNear` (`spherical: true`) from the address point. `deliversToAddress` compares the **exact** distance in metres with the radius; only the displayed `distanceKm` is rounded.
 - Store hours are edited as a pair (`openingMinutes` + `closingMinutes` together), so opening < closing is checked on the request alone, never against stored values.
@@ -366,8 +372,10 @@ counters       _id (store code), seq — never reset
     - Signed upload URLs are valid for **2 hours** (fixed by Supabase) and allow one upload to that path: no `upsert`, so an object is never overwritten.
   - Order creation: each path must match the exact pattern `^{userId}/{uuid}\.(jpg|png)$`, exist in `uploads` for this customer, and exist in storage with an allowed type and size.
     - Verified against the real bucket: it checks only the uploader's `Content-Type` **header**, never the bytes (a text file sent as `image/jpeg` is stored), and the header may disagree with the path's extension (a `.jpg` path can be stored as `image/png`). So the stored object's content type must equal the one recorded in `uploads` for that path.
-    - **Signature check (decided by the user):** the object's first bytes must match its type: JPEG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`; otherwise `INVALID_UPLOAD`. Read only those bytes, never the whole image: a short-lived signed view URL fetched with `Range: bytes=0-7` returns `206` with just those bytes (verified against the real bucket). This runs for new orders and for reorders (check 5). Image bytes are never logged. Look up the installed storage-js API for reading one object's metadata — don't guess a method name, and don't rely on `list()` over the whole folder (it is paginated, so it breaks for customers with many uploads).
-  - Viewing: `createSignedUrls` for all of an order's images in one call, lifetime ≤ 600 s.
+    - **Signature check (decided by the user):** the object's first bytes must match its type: JPEG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`; otherwise `INVALID_UPLOAD`. Read only those bytes, never the whole image: a short-lived signed view URL fetched with `Range: bytes=0-7` returns `206` with just those bytes (verified against the real bucket). This runs for new orders and for reorders (check 5). Image bytes are never logged. Never `list()` over the whole folder (it is paginated, so it breaks for customers with many uploads).
+    - `verifyImageObject(path, contentType)` (storage-js 2.117): `info(path)` returns camelised `{ size, contentType, … }`; a missing object is an error with `status` 404 **or** a 400 whose `statusCode` is `"404"` → `false` (`INVALID_UPLOAD`), any other error → 503. Then `createSignedUrl(path, 60)` + `fetch` with `Range: bytes=0-7`; anything but `206` → 503.
+    - `orderImages.js` checks the path pattern and the `uploads` records (one `$in` query) before calling storage, then verifies all images in parallel.
+  - Viewing: `createSignedViewUrls(paths)` — `createSignedUrls` for all of an order's images in one call, `SIGNED_VIEW_URL_TTL_SECONDS` (600); an item that can't be signed → 503.
   - No Storage RLS policies: nothing reaches the bucket except this service and the signed URLs it issues. Never make the bucket public.
   - Tests mock `services/storage.js`; they never call Supabase.
 - **Push** (`services/push.js`): `expo-server-sdk` with `accessToken: EXPO_ACCESS_TOKEN` (enhanced push security), send in chunks, delete tokens that return `DeviceNotRegistered`. Called after the DB write; errors are logged, never thrown to the request. Texts (`{n}` = order number, amounts formatted from paise, times in IST):
@@ -415,7 +423,8 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 - Build apps with `createApp({ rateLimits })` to use low limits in tests; mock a module with `vi.mock` (e.g. `config/db.js`) rather than reaching into library internals.
 - Every endpoint: at least one success test **and** a test for each domain error code listed for it in section 7.
 - Tests that depend on an index (unique, 2dsphere for `$geoNear`) `await Model.init()` first (e.g. `ensureStoreIndexes` in `test/helpers/store.js`); indexes are built in the background otherwise.
-- The order transition table is tested exhaustively: every allowed transition succeeds, every other pair returns `INVALID_ORDER_TRANSITION`, and concurrent transitions produce exactly one winner and one `ORDER_STATUS_CHANGED`.
+- The order transition table is tested exhaustively: every allowed transition succeeds, every other pair returns `INVALID_ORDER_TRANSITION`, and concurrent transitions produce exactly one winner and one `ORDER_STATUS_CHANGED`. Race tests use `holdOrderUpdatesUntil(n)` (`test/helpers/order.js`), which holds `Order.findOneAndUpdate` until all `n` requests have read the order, so the outcome doesn't depend on timing.
+- Order tests may seed orders in any status with `seedOrder` (admin actions don't exist yet). Bill expiry is tested by backdating `billSentAt`, not by moving the clock past the 15-minute access token.
 - Concurrency: two simultaneous order creations at 2 open orders produce exactly one success and one `TOO_MANY_OPEN_ORDERS`; two simultaneous requests with the same `Idempotency-Key` produce one order, returned to both.
 - Time and distance logic (`isStoreOpen`, `nextOpensAt`, `billExpiresAt`, radius checks) is tested with injected `now` values around opening and closing boundaries. Where a service reads the clock, use `vi.useFakeTimers({ toFake: ["Date"] })` + `vi.setSystemTime` — faking all timers hangs the Mongo driver.
 - Jobs are tested by calling the exported function with a `now`, never by waiting for the interval.

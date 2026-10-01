@@ -24,6 +24,9 @@ const userSchema = new mongoose.Schema(
     // Bumped first when issuing an upload URL, so concurrent requests run one at a time and the
     // hourly and daily upload limits stay exact.
     uploadIssueSeq: { type: Number, default: 0, select: false },
+    // Bumped first inside every order-creation transaction, so concurrent creates and reorders of
+    // one customer run one at a time (open-order limit, idempotency key).
+    orderCreateSeq: { type: Number, default: 0, select: false },
   },
   {
     timestamps: true,
@@ -34,6 +37,7 @@ const userSchema = new mongoose.Schema(
         delete ret.googleId;
         delete ret.addressWriteSeq;
         delete ret.uploadIssueSeq;
+        delete ret.orderCreateSeq;
         return ret;
       },
     },

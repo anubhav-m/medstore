@@ -13,8 +13,11 @@ const SENSITIVE_KEYS = [
   "pushToken",
   // Signed upload URLs carry their token in the query string.
   "signedUrl",
+  // Signed photo view URLs carry their token too.
+  "imageUrls",
   "phone",
   "customerPhone",
+  "customerName",
   "address",
   "deliveryAddress",
   "patientName",
