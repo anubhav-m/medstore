@@ -16,6 +16,7 @@ const valid = {
   SUPABASE_URL: "https://abcdefghijklmnop.supabase.co",
   SUPABASE_SECRET_KEY: "sb_secret_example-key",
   SUPABASE_BUCKET: "prescriptions",
+  BILL_CONFIRMATION_TIMEOUT_MINUTES: "60",
 };
 
 const errorMessage = (source) => {
@@ -29,7 +30,12 @@ const errorMessage = (source) => {
 
 describe("parseEnv", () => {
   it("parses a valid environment and converts numbers", () => {
-    expect(parseEnv(valid)).toEqual({ ...valid, PORT: 4000, TRUST_PROXY: 1 });
+    expect(parseEnv(valid)).toEqual({
+      ...valid,
+      PORT: 4000,
+      TRUST_PROXY: 1,
+      BILL_CONFIRMATION_TIMEOUT_MINUTES: 60,
+    });
   });
 
   it.each(Object.keys(valid))("names %s when it is missing", (key) => {
@@ -66,6 +72,9 @@ describe("parseEnv", () => {
     ["SUPABASE_SECRET_KEY", "eyJhbGciOiJIUzI1NiJ9.anon-key.signature"],
     ["SUPABASE_BUCKET", "Prescriptions"],
     ["SUPABASE_BUCKET", "my/bucket"],
+    ["BILL_CONFIRMATION_TIMEOUT_MINUTES", "0"],
+    ["BILL_CONFIRMATION_TIMEOUT_MINUTES", "1441"],
+    ["BILL_CONFIRMATION_TIMEOUT_MINUTES", "7.5"],
   ])("rejects malformed %s (%j) without echoing the value", (key, value) => {
     const message = errorMessage({ ...valid, [key]: value });
     expect(message).toContain(key);

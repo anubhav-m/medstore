@@ -53,7 +53,7 @@ orders/
 └── order.validation.js       # Zod schemas for both surfaces
 ```
 
-`orders/` also has, because one service file would exceed ~200 lines: `orderTransition.js` (`transitionOrder` — the only code that changes an order's status), `orderPlacement.service.js` (create + reorder: the creation checks and the creation transaction), `orderImages.js` (creation check 5), `order.view.js` (customer response shapes) and `counter.model.js` (order numbers).
+`orders/` also has, because one service file would exceed ~200 lines: `orderTransition.js` (`transitionOrder` — the only code that changes an order's status), `orderPlacement.service.js` (create + reorder: the creation checks and the creation transaction), `orderImages.js` (creation check 5), `order.view.js` (customer response shapes) and `counter.model.js` (order numbers). The admin surface has `order.admin.service.js` (list, counts, detail, item suggestions), `orderAdminActions.service.js` (reject, bill, pack, dispatch, deliver, fail, cancel), `orderBill.js` (bill totals and `billExpiresAt`), `order.admin.view.js` (admin response shapes) and `order.admin.validation.js`.
 
 Each file in `services/` is the **only** place that talks to its integration (bucket, email provider, Expo push, Google). Modules call these services; they never import the SDKs directly.
 
@@ -178,7 +178,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 - Validated data goes on `req.validated`. Do not reassign `req.query` (read-only in Express 5).
 - Path params are always ObjectIds, validated with `idParamsSchema` (`utils/idParams.js`). `validate` turns a `params` failure into `400 INVALID_ID`, never `VALIDATION_ERROR`.
 - Never pass `req.body` / `req.query` straight into Mongoose. Destructure the fields you need; strict schemas also block NoSQL operator injection (`{ "$ne": null }`).
-- User text used in a regex (order search, item suggestions) always goes through `utils/escapeRegex` and is anchored as a prefix (`^`).
+- User text used in a regex (order search, item suggestions) always goes through `utils/escapeRegex` (`prefixPattern`: escaped and anchored with `^`). Match against a stored lowercase or uppercase key instead of using the `i` flag, so the index applies.
 - Rupee inputs never exist on the API — money fields are integer paise.
 
 ## 6. Authentication & authorization
@@ -283,20 +283,22 @@ Admin — `/api/v1/admin`:
 | `POST /auth/change-password` | `{ currentPassword, newPassword }` → fresh tokens; clears `mustChangePassword` | `INVALID_CREDENTIALS` |
 | `GET /me` | `{ admin: { id, username, name, role, storeIds, mustChangePassword }, stores: [{ id, code, name }] }` — `stores` are the scoped stores by code | — |
 | `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body | — |
-| `GET /orders?storeId=&tab=&q=&page=` | `tab` from `ADMIN_ORDER_TABS`; `q` = order number or phone prefix; no image URLs | `STORE_NOT_FOUND` |
-| `GET /orders/counts?storeId=` | count per tab | `STORE_NOT_FOUND` |
-| `GET /orders/:id` | includes signed `imageUrls` and customer contact | `ORDER_NOT_FOUND` |
-| `POST /orders/:id/reject` | `{ reasonCode, note? }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
-| `POST /orders/:id/bill` | `{ expectedBillVersion, items, deliveryFeePaise?, discountPaise? }`; creates (version 0 → 1) or revises | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED`, `BILL_CHANGED` |
+| `GET /orders?storeId=&tab=&q=&page=&limit=` | `{ orders: AdminOrderSummary[] }` + `meta`; `tab` from `ADMIN_ORDER_TABS`, sorted as its table says (no `tab`: every status, newest first); `q` (1–50 chars) = order-number prefix or phone (see below); no image URLs | `STORE_NOT_FOUND` |
+| `GET /orders/counts?storeId=` | `{ counts: Record<AdminOrderTab, number> }` from one aggregation | `STORE_NOT_FOUND` |
+| `GET /orders/:id` | `{ order: AdminOrderDetail }`: signed `imageUrls` (600 s), the copied customer `{ id, name, phone }`, history with admin names | `ORDER_NOT_FOUND`, `SERVICE_UNAVAILABLE` (signing failed) |
+| `POST /orders/:id/reject` | `{ reasonCode, note? }` (`RejectReason`; `note` required for `OTHER`) → `{ order: AdminOrder }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
+| `POST /orders/:id/bill` | `{ expectedBillVersion, items[{ name, quantity, unitPricePaise }], deliveryFeePaise?, discountPaise? }`; creates (version 0 → 1) or revises (version + 1); fee defaults to the order's current one, discount to 0; client totals are a 400 | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED`, `BILL_CHANGED` |
 | `POST /orders/:id/pack` · `/dispatch` | | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
-| `POST /orders/:id/deliver` | `{ cashCollectedPaise }` | same as above |
-| `POST /orders/:id/fail` · `/cancel` | `{ reasonCode, note? }` | same as above |
-| `GET /item-suggestions?storeId=&q=` | | `STORE_NOT_FOUND` |
+| `POST /orders/:id/deliver` | `{ cashCollectedPaise }` (integer ≥ 0, no other cap) | same as above |
+| `POST /orders/:id/fail` · `/cancel` | `{ reasonCode, note? }` (`DeliveryFailedReason` / `StaffCancelReason`) | same as above |
+| `GET /item-suggestions?storeId=&q=` | `{ suggestions: string[] }`: `q` 1–50 chars; distinct names (latest spelling), sorted, ≤ 10 | `STORE_NOT_FOUND` |
 | `GET /stores` | `{ stores: AdminStore[] }`: scoped stores by code (owner: all, including inactive); not paginated | — |
 | `POST /stores` (owner) | `{ code, name, address { line1, line2?, city, pincode }, phone, lat, lng, deliveryRadiusKm, openingMinutes, closingMinutes, deliveryFeePaise, isAcceptingOrders?, isActive? }` → `{ store }` | `FORBIDDEN`, `DUPLICATE_RESOURCE` (field `code`) |
 | `PATCH /stores/:id` (owner) | any create field except `code` (sending it is a 400); `address` is replaced whole; `lat` + `lng` together; `openingMinutes` + `closingMinutes` together → `{ store }` | `FORBIDDEN`, `STORE_NOT_FOUND` |
 | `PATCH /customers/:id/block` (owner) | `{ isBlocked }` | `FORBIDDEN`, `CUSTOMER_NOT_FOUND` |
 | `GET /reports/daily?storeId=&date=` (owner) | IST date | `FORBIDDEN`, `STORE_NOT_FOUND` |
+
+Admin order search (`q`): always an order-number prefix (uppercased, so the index applies — store codes may be all digits); also a phone when it looks like one: a complete number in any accepted customer format matches exactly, 1–9 digits (optionally after `+91`) match the start of the 10-digit number. Every admin order action returns `{ order: AdminOrder }` — the detail without image URLs.
 
 Plus `GET /health` (no auth). Each transition has its own action endpoint with its own Zod schema; there is no generic "set status" endpoint. `DELETE` endpoints that take a body are called only by our own apps, never through a browser or CDN.
 
@@ -346,7 +348,7 @@ counters       _id (store code), seq — never reset
   - `admins`: `username` unique
   - `stores`: `code` unique; `location` 2dsphere
   - `addresses`: `{ userId, createdAt: -1 }`; `userId` unique with `partialFilterExpression: { isDefault: true }` (at most one default, enforced by the database)
-  - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks). The expiry, suggestion, search and report indexes are added by the features that first query them.
+  - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks). The expiry and report indexes are added by the features that first query them.
   - `uploads`: `path` unique; `{ userId, createdAt }`; `{ attachedAt, createdAt }` (cleanup job — added with it)
   - `refreshTokens`: `tokenHash` unique; `{ subjectKind, subjectId }`; TTL on `expiresAt`
   - `otpCodes`: `{ userId, purpose }` unique; TTL on `expiresAt`
@@ -424,7 +426,7 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 - Every endpoint: at least one success test **and** a test for each domain error code listed for it in section 7.
 - Tests that depend on an index (unique, 2dsphere for `$geoNear`) `await Model.init()` first (e.g. `ensureStoreIndexes` in `test/helpers/store.js`); indexes are built in the background otherwise.
 - The order transition table is tested exhaustively: every allowed transition succeeds, every other pair returns `INVALID_ORDER_TRANSITION`, and concurrent transitions produce exactly one winner and one `ORDER_STATUS_CHANGED`. Race tests use `holdOrderUpdatesUntil(n)` (`test/helpers/order.js`), which holds `Order.findOneAndUpdate` until all `n` requests have read the order, so the outcome doesn't depend on timing.
-- Order tests may seed orders in any status with `seedOrder` (admin actions don't exist yet). Bill expiry is tested by backdating `billSentAt`, not by moving the clock past the 15-minute access token.
+- Order tests may seed orders in any status with `seedOrder` / `seedStoreOrder` (`test/helpers/adminOrder.js`, which also holds a valid request for every staff action). Bill expiry is tested by backdating `billSentAt`, not by moving the clock past the 15-minute access token.
 - Concurrency: two simultaneous order creations at 2 open orders produce exactly one success and one `TOO_MANY_OPEN_ORDERS`; two simultaneous requests with the same `Idempotency-Key` produce one order, returned to both.
 - Time and distance logic (`isStoreOpen`, `nextOpensAt`, `billExpiresAt`, radius checks) is tested with injected `now` values around opening and closing boundaries. Where a service reads the clock, use `vi.useFakeTimers({ toFake: ["Date"] })` + `vi.setSystemTime` — faking all timers hangs the Mongo driver.
 - Jobs are tested by calling the exported function with a `now`, never by waiting for the interval.
@@ -445,7 +447,7 @@ BILL_CONFIRMATION_TIMEOUT_MINUTES     # 60 in .env.example
 
 All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
 
-**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend), `SUPABASE_URL` (the bare https project URL — no `/rest/v1` or other path), `SUPABASE_SECRET_KEY` (must start with `sb_secret_`), `SUPABASE_BUCKET` (lowercase bucket name; `prescriptions`). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
+**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend), `SUPABASE_URL` (the bare https project URL — no `/rest/v1` or other path), `SUPABASE_SECRET_KEY` (must start with `sb_secret_`), `SUPABASE_BUCKET` (lowercase bucket name; `prescriptions`), `BILL_CONFIRMATION_TIMEOUT_MINUTES` (1–1440). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
 
 Local development uses a separate Atlas dev cluster (or Docker `mongo` started with `--replSet rs0`). A MongoDB installed as a Windows service starts standalone; it needs `replication.replSetName` in `mongod.cfg` and a one-time `rs.initiate()` before transactions work.
 

@@ -11,7 +11,7 @@ const toStatusEntry = ({ status, at, by, note }) => ({
   note: note ?? null,
 });
 
-const toBill = (order) =>
+export const toBill = (order) =>
   order.billVersion > 0
     ? {
         version: order.billVersion,
@@ -30,9 +30,10 @@ const toBill = (order) =>
       }
     : null;
 
-const toReason = (reason) => (reason ? { code: reason.code, note: reason.note ?? null } : null);
+export const toReason = (reason) =>
+  reason ? { code: reason.code, note: reason.note ?? null } : null;
 
-const toCancellation = (cancellation) =>
+export const toCancellation = (cancellation) =>
   cancellation
     ? {
         byKind: cancellation.byKind,
@@ -41,7 +42,7 @@ const toCancellation = (cancellation) =>
       }
     : null;
 
-const toDeliveryAddress = ({ label, line1, line2, landmark, city, pincode, location }) => ({
+export const toDeliveryAddress = ({ label, line1, line2, landmark, city, pincode, location }) => ({
   label,
   line1,
   line2: line2 ?? null,

@@ -222,9 +222,10 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 
 **Bill**
 - Items are free text: `name` (2–100 chars), `quantity` (integer 1–999), `unitPricePaise` (integer 1–10,000,000); 1–50 items.
-- The server computes `lineTotalPaise`, `subtotalPaise` and `totalPaise = subtotal + deliveryFee − discount`. `deliveryFeePaise` (0–100,000) defaults to the fee copied into the order and staff may change it; `discountPaise` is 0–subtotal. Totals sent by any client are ignored.
+- The server computes `lineTotalPaise`, `subtotalPaise` and `totalPaise = subtotal + deliveryFee − discount`. `deliveryFeePaise` (0–100,000) defaults to the order's current fee (copied from the store at creation, or what the previous bill used) and staff may change it; `discountPaise` is 0–subtotal. Totals are never taken from a client: sending one is a `400 VALIDATION_ERROR` (strict schemas).
 - **Expiry**: sending or revising a bill sets `billSentAt` and `billExpiresAt = billSentAt + BILL_CONFIRMATION_TIMEOUT_MINUTES` (default 60). If the bill is sent before the store's closing time that IST day, `billExpiresAt` is capped at closing time. A revision restarts the expiry.
 - Item-name suggestions come from names previously billed at the same store: case-insensitive prefix match, distinct, max 10. There is no catalog collection.
+  - Only items on the bills currently stored count. A revision replaces an order's items, so a name it removed is no longer suggested unless another order still has it. Decided by the user: this is accepted, and it also drops typos corrected in a revision.
 
 **Reorder**
 - Only from the customer's own **`DELIVERED`** orders → otherwise `409 REORDER_NOT_ALLOWED`.
@@ -241,6 +242,8 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 | Out for delivery | `OUT_FOR_DELIVERY` | oldest first |
 | Delivered | `DELIVERED` | newest first |
 | Closed | `REJECTED`, `CANCELLED`, `DELIVERY_FAILED` | newest first |
+
+Oldest and newest are by `createdAt`. Without a tab, the admin list shows every status, newest first.
 
 **Other order rules**
 - **Money is integer paise.** Never floats — not in the DB, API, or app math.

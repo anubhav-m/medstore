@@ -107,6 +107,10 @@ orderSchema.index({ userId: 1, idempotencyKey: 1 }, { unique: true });
 orderSchema.index({ userId: 1, status: 1, createdAt: -1 });
 // Admin tabs.
 orderSchema.index({ storeId: 1, status: 1, createdAt: -1 });
+// Admin search by phone (order-number prefixes use the unique index).
+orderSchema.index({ storeId: 1, customerPhone: 1 });
+// Item-name suggestions.
+orderSchema.index({ storeId: 1, "items.nameKey": 1 });
 // Whether any order still references an image.
 orderSchema.index({ "images.path": 1 });
 

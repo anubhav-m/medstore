@@ -11,7 +11,7 @@ import { z } from "zod";
 import { idParamsSchema, objectId } from "../../utils/idParams.js";
 import { paginationQuery } from "../../utils/pagination.js";
 
-const text = (min, max) =>
+export const text = (min, max) =>
   z
     .string()
     .trim()

@@ -38,9 +38,10 @@ export const createTestStore = (overrides = {}) =>
 
 export const signInOwner = async (app) => adminApi(app, (await signInAdmin(app)).accessToken);
 
-export const signInStaff = async (app, storeCodes) => {
+export const signInStaff = async (app, storeCodes, username = "staff.one") => {
   const session = await signInAdmin(app, {
-    username: "staff.one",
+    username,
+    name: "Staff One",
     role: AdminRole.STAFF,
     storeCodes,
   });

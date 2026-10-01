@@ -23,6 +23,37 @@ export const CustomerCancelReason = {
 
 export type CustomerCancelReason = (typeof CustomerCancelReason)[keyof typeof CustomerCancelReason];
 
+/** Required when staff reject an order; a note is required with `OTHER`. */
+export const RejectReason = {
+  PRESCRIPTION_UNCLEAR: "PRESCRIPTION_UNCLEAR",
+  PRESCRIPTION_EXPIRED: "PRESCRIPTION_EXPIRED",
+  PRESCRIPTION_REQUIRED: "PRESCRIPTION_REQUIRED",
+  MEDICINE_UNAVAILABLE: "MEDICINE_UNAVAILABLE",
+  OTHER: "OTHER",
+} as const;
+
+export type RejectReason = (typeof RejectReason)[keyof typeof RejectReason];
+
+/** Required when staff cancel an order; a note is required with `OTHER`. */
+export const StaffCancelReason = {
+  CUSTOMER_REQUESTED: "CUSTOMER_REQUESTED",
+  MEDICINE_UNAVAILABLE: "MEDICINE_UNAVAILABLE",
+  UNABLE_TO_DELIVER: "UNABLE_TO_DELIVER",
+  OTHER: "OTHER",
+} as const;
+
+export type StaffCancelReason = (typeof StaffCancelReason)[keyof typeof StaffCancelReason];
+
+/** Required when a delivery fails; a note is required with `OTHER`. */
+export const DeliveryFailedReason = {
+  CUSTOMER_UNREACHABLE: "CUSTOMER_UNREACHABLE",
+  CUSTOMER_REFUSED: "CUSTOMER_REFUSED",
+  WRONG_ADDRESS: "WRONG_ADDRESS",
+  OTHER: "OTHER",
+} as const;
+
+export type DeliveryFailedReason = (typeof DeliveryFailedReason)[keyof typeof DeliveryFailedReason];
+
 /** Cash on delivery is the only payment method. */
 export const PAYMENT_METHOD_COD = "COD";
 

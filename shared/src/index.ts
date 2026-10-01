@@ -1,5 +1,6 @@
 export * from "./addresses.js";
 export * from "./adminAuth.js";
+export * from "./adminOrders.js";
 export * from "./adminRoles.js";
 export * from "./api.js";
 export * from "./auth.js";

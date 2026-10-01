@@ -18,6 +18,7 @@ export default defineConfig({
       SUPABASE_URL: "https://test-project.supabase.co",
       SUPABASE_SECRET_KEY: "sb_secret_test-key",
       SUPABASE_BUCKET: "prescriptions",
+      BILL_CONFIRMATION_TIMEOUT_MINUTES: "60",
     },
     globalSetup: ["./test/globalSetup.js"],
     setupFiles: ["./test/setup.js"],

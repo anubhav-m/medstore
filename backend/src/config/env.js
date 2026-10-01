@@ -47,6 +47,8 @@ const envSchema = z
     SUPABASE_BUCKET: z
       .string()
       .regex(/^[a-z0-9][a-z0-9_-]{1,62}$/, "must be a lowercase bucket name"),
+    // Minutes a customer has to confirm a bill; capped at the store's closing time (root 3.4).
+    BILL_CONFIRMATION_TIMEOUT_MINUTES: integerString(1, 1440),
   })
   .superRefine((env, ctx) => {
     // A shared secret would let a token or code from one world pass as another.

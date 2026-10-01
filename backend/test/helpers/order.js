@@ -59,7 +59,7 @@ export const billFields = ({ version = 1, sentAt = NOW } = {}) => ({
   billExpiresAt: new Date(sentAt.getTime() + HOUR_MS),
 });
 
-// Written straight to the database in any status (admin actions don't exist yet). The history
+// Written straight to the database in any status, so tests start from the state they need. The history
 // includes an admin entry whenever an admin would have acted, so tests can check it never leaks.
 export const seedOrder = async ({
   userId,

@@ -12,13 +12,14 @@ export const ADMIN_PASSWORD = "a long admin password";
 // test starts from the state it needs.
 export const createTestAdmin = async ({
   username = ADMIN_USERNAME,
+  name = "Owner One",
   password = ADMIN_PASSWORD,
   mustChangePassword = false,
   isActive = true,
   role = AdminRole.OWNER,
   storeCodes = [],
 } = {}) => {
-  const admin = await createAdmin({ username, name: "Owner One", password, role, storeCodes });
+  const admin = await createAdmin({ username, name, password, role, storeCodes });
   await Admin.updateOne({ _id: admin.id }, { $set: { mustChangePassword, isActive } });
   return { ...admin, mustChangePassword };
 };

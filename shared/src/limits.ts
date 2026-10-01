@@ -6,6 +6,13 @@ export type AllowedImageType = (typeof ALLOWED_IMAGE_TYPES)[number];
 export const UPLOAD_URLS_PER_HOUR = 20;
 export const UPLOAD_URLS_PER_IST_DAY = 30;
 export const MAX_BILL_ITEMS = 50;
+export const BILL_ITEM_NAME_MIN_LENGTH = 2;
+export const BILL_ITEM_NAME_MAX_LENGTH = 100;
+export const BILL_ITEM_MAX_QUANTITY = 999;
+export const BILL_UNIT_PRICE_MAX_PAISE = 10_000_000;
+// Admin order search (`q`) and item-name suggestions.
+export const SEARCH_QUERY_MAX_LENGTH = 50;
+export const MAX_ITEM_SUGGESTIONS = 10;
 export const MAX_OPEN_ORDERS = 3;
 export const CUSTOMER_NOTE_MAX_LENGTH = 500;
 export const PATIENT_NAME_MIN_LENGTH = 2;
