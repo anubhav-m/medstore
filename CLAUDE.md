@@ -157,11 +157,16 @@ Reports are **owner-only**. Admins are created and managed only with the backend
 
 ### 3.3 Stores
 - Fields: `code` (2–6 uppercase letters/digits, unique, used in order numbers), `name`, address (`line1`, `line2`, `city`, `pincode`), `phone`, `location`, `deliveryRadiusKm` (0.5–50, one decimal), `openingMinutes` / `closingMinutes` (minutes after midnight, IST, opening < closing — no overnight or 24-hour stores in v1), `deliveryFeePaise`, `isAcceptingOrders`, `isActive`.
+  - `code` **can never change** after creation (it is part of every order number). Input is trimmed and uppercased.
+  - Hours are integers 0–1440 with opening < closing; `0`–`1440` (open all day) is rejected. **24-hour stores are future work**: allowing them means skipping the closing-time cap on `billExpiresAt` (3.4) for those stores. Overnight hours (closing after midnight) are not planned.
+  - `phone`: an Indian 10-digit number starting 1–9 (mobile, or landline with its STD code), entered like a customer phone and stored as `+91XXXXXXXXXX`.
+  - New stores are active and accepting orders unless the owner sends `isActive` / `isAcceptingOrders`.
+  - Hours, radius, fee and everything else except `code` can be edited by the owner at any time (`PATCH /api/v1/admin/stores/:id`). Staff can't create or edit stores.
 - A store is **open** when `isActive && isAcceptingOrders && openingMinutes <= nowIST < closingMinutes`. This check exists in exactly one function, `isStoreOpen(store, now)`, which takes `now` as an argument. Nothing re-implements it.
 - Time is always evaluated in **Asia/Kolkata**. Never use the server's local time — servers run in UTC.
 - The delivery radius is measured from the **delivery address pin** (not the phone's current location) to the store, as straight-line distance using MongoDB 2dsphere queries. Never call road-distance APIs.
 - **GeoJSON coordinates are `[longitude, latitude]`.** Google and UIs use lat/lng — convert at the boundaries and name variables `lat` / `lng` explicitly.
-- The customer stores endpoint returns only **active** stores, each with server-computed `distanceKm`, `deliversToAddress`, `isOpen` and `nextOpensAt` (the next IST opening instant, or `null` when the store is paused with `isAcceptingOrders: false`). Apps display these and never calculate distance or opening hours themselves.
+- The customer stores endpoint returns only **active** stores, each with server-computed `distanceKm`, `deliversToAddress`, `isOpen` and `nextOpensAt` (the next IST opening instant when the store is closed only because of its hours; `null` when it is open, paused with `isAcceptingOrders: false`, or inactive). `nextOpensAt(store, now)` lives next to `isStoreOpen` and is the only place that computes it. Apps display these and never calculate distance or opening hours themselves.
 - Changing hours, radius or delivery fee affects new orders only.
 - Stores are created by the owner through `POST /api/v1/admin/stores` (with an HTTP client until the admin app exists).
 
@@ -293,6 +298,7 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 | Date of birth | 1900-01-01 to yesterday (IST) |
 | Bill | 1–50 items; name 2–100 chars; quantity 1–999; unit price 1–10,000,000 paise; delivery fee 0–100,000 paise |
 | Delivery radius | 0.5–50 km, one decimal |
+| Store | code 2–6 of `A–Z 0–9`; name 2–80 chars; phone Indian 10 digits starting 1–9; hours 0–1440 minutes, opening < closing, not 0–1440; delivery fee 0–100,000 paise; address limits as for customer addresses |
 | Search / suggestion query | 1–50 chars; suggestions max 10 |
 | Pagination | default 20, max 100 |
 | Signed view URL lifetime | ≤ 600 s |

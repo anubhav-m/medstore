@@ -1,4 +1,5 @@
 import type { AdminRole } from "./adminRoles.js";
+import type { StoreSummary } from "./stores.js";
 
 export interface AdminLoginRequest {
   username: string;
@@ -28,7 +29,8 @@ export interface AdminAuthSession {
   admin: AuthAdmin;
 }
 
-/** `data` of admin GET /me. */
+/** `data` of admin GET /me. `stores` are the admin's stores (owner: all, including inactive), by code. */
 export interface AdminMeResponse {
   admin: AuthAdmin;
+  stores: StoreSummary[];
 }

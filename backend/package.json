@@ -11,6 +11,7 @@
     "admin:reset-password": "node --env-file=.env scripts/admin-reset-password.js",
     "admin:disable": "node --env-file=.env scripts/admin-disable.js",
     "admin:enable": "node --env-file=.env scripts/admin-enable.js",
+    "admin:set-stores": "node --env-file=.env scripts/admin-set-stores.js",
     "admin:list": "node --env-file=.env scripts/admin-list.js"
   },
   "dependencies": {

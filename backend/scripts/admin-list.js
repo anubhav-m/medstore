@@ -1,8 +1,8 @@
+import { AdminRole } from "@medstore/shared";
 import { listAdmins } from "../src/modules/admins/admin.service.js";
 import { write } from "./lib/prompt.js";
 import { runAdminScript } from "./lib/runAdminScript.js";
 
-// Store codes join the columns with the stores feature.
 await runAdminScript(async () => {
   const admins = await listAdmins();
   if (admins.length === 0) {
@@ -11,6 +11,7 @@ await runAdminScript(async () => {
   }
   for (const admin of admins) {
     const status = admin.isActive ? "active" : "disabled";
-    write(`${admin.username}\t${admin.role}\t${status}\t${admin.name}\n`);
+    const stores = admin.role === AdminRole.OWNER ? "all stores" : admin.storeCodes.join(",");
+    write(`${admin.username}\t${admin.role}\t${stores}\t${status}\t${admin.name}\n`);
   }
 });

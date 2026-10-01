@@ -1,8 +1,9 @@
-import { ErrorCodes } from "@medstore/shared";
+import { AdminRole, ErrorCodes } from "@medstore/shared";
 import { AppError } from "../../utils/AppError.js";
 import { hashPassword } from "../../utils/password.js";
 import { SubjectKind } from "../auth/refreshToken.model.js";
 import { revokeAllSessions } from "../auth/session.service.js";
+import { resolveStoreCodes } from "../stores/store.service.js";
 import { Admin } from "./admin.model.js";
 
 // Admins are a handful of people; the bound only stops a runaway query.
@@ -20,8 +21,19 @@ export const toAuthAdmin = (admin) => ({
   mustChangePassword: admin.mustChangePassword,
 });
 
+// Owners act on every store, so none are assigned to them; staff act only on theirs.
+const resolveAdminStores = async (role, storeCodes) => {
+  const isStaff = role === AdminRole.STAFF;
+  if (isStaff !== storeCodes.length > 0) {
+    const message = isStaff ? "Staff need at least one store" : "Owners aren't given stores";
+    throw new AppError(message, 400, ErrorCodes.VALIDATION_ERROR);
+  }
+  return isStaff ? resolveStoreCodes(storeCodes) : [];
+};
+
 // Every new admin must replace the password the owner chose for them at first sign-in.
-export const createAdmin = async ({ username, name, password, role }) => {
+export const createAdmin = async ({ username, name, password, role, storeCodes = [] }) => {
+  const storeIds = await resolveAdminStores(role, storeCodes);
   const passwordHash = await hashPassword(password);
   try {
     const admin = await Admin.create({
@@ -29,6 +41,7 @@ export const createAdmin = async ({ username, name, password, role }) => {
       name,
       passwordHash,
       role,
+      storeIds,
       mustChangePassword: true,
     });
     return toAuthAdmin(admin);
@@ -75,8 +88,26 @@ export const enableAdmin = async (username) => {
   return admin && toAuthAdmin(admin);
 };
 
-export const listAdmins = () =>
-  Admin.find({}, { username: 1, name: 1, role: 1, isActive: 1 })
+// Replaces a staff member's stores; returns null for owners too. storeIds are read on every
+// request, so the change applies without signing anyone out.
+export const setAdminStores = async (username, storeCodes) => {
+  const storeIds = await resolveAdminStores(AdminRole.STAFF, storeCodes);
+  const admin = await Admin.findOneAndUpdate(
+    { username, role: AdminRole.STAFF },
+    { $set: { storeIds } },
+    { returnDocument: "after" },
+  ).lean();
+  return admin && toAuthAdmin(admin);
+};
+
+export const listAdmins = async () => {
+  const admins = await Admin.find({}, { username: 1, name: 1, role: 1, isActive: 1, storeIds: 1 })
+    .populate("storeIds", "code")
     .sort({ username: 1 })
     .limit(MAX_LISTED_ADMINS)
     .lean();
+  return admins.map(({ storeIds, ...admin }) => ({
+    ...admin,
+    storeCodes: storeIds.map((store) => store.code),
+  }));
+};

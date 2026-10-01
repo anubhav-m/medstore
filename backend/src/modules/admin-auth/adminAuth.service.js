@@ -10,6 +10,7 @@ import {
   revokeAllSessions,
   rotateRefreshToken,
 } from "../auth/session.service.js";
+import { listStoreSummaries } from "../stores/store.service.js";
 
 const invalidCredentials = (message = "Invalid username or password") =>
   new AppError(message, 401, ErrorCodes.INVALID_CREDENTIALS);
@@ -64,5 +65,5 @@ export const changePassword = async (adminId, { currentPassword, newPassword }) 
 export const getMe = async (adminId) => {
   const admin = await Admin.findById(adminId).lean();
   if (!admin) throw invalidToken();
-  return toAuthAdmin(admin);
+  return { admin: toAuthAdmin(admin), stores: await listStoreSummaries(admin) };
 };

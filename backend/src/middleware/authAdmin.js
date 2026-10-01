@@ -5,14 +5,20 @@ import { Admin } from "../modules/admins/admin.model.js";
 import { accountDisabled } from "../modules/admins/admin.service.js";
 import { AppError } from "../utils/AppError.js";
 
-// The admin is loaded on every request (there are only a few), so disabling an account or
-// requiring a password change applies immediately, whatever the token says.
+// The admin is loaded on every request (there are only a few), so disabling an account,
+// requiring a password change or changing the role or stores applies immediately, whatever the
+// token says.
 const createAuthAdmin =
   ({ allowPendingPasswordChange }) =>
   async (req, _res, next) => {
     try {
       const adminId = verifyAccessToken(req.get("authorization"), SubjectKind.ADMIN);
-      const admin = await Admin.findById(adminId, { isActive: 1, mustChangePassword: 1 }).lean();
+      const admin = await Admin.findById(adminId, {
+        isActive: 1,
+        mustChangePassword: 1,
+        role: 1,
+        storeIds: 1,
+      }).lean();
       if (!admin) throw invalidToken();
       if (!admin.isActive) throw accountDisabled();
       if (admin.mustChangePassword && !allowPendingPasswordChange) {
@@ -23,7 +29,7 @@ const createAuthAdmin =
         );
       }
 
-      req.admin = { id: adminId };
+      req.admin = { id: adminId, role: admin.role, storeIds: admin.storeIds };
       return next();
     } catch (error) {
       return next(error);

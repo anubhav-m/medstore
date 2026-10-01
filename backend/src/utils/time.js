@@ -12,3 +12,13 @@ export const istDateString = (now) => {
   );
   return `${parts.year}-${parts.month}-${parts.day}`;
 };
+
+const MINUTE_MS = 60_000;
+
+// IST is a fixed UTC+05:30 with no DST, so an IST wall-clock time maps to one instant.
+export const istDayStart = (now) => new Date(`${istDateString(now)}T00:00:00.000+05:30`);
+
+// Whole minutes since IST midnight (0–1439).
+export const istMinutesOfDay = (now) => Math.floor((now - istDayStart(now)) / MINUTE_MS);
+
+export const addMinutes = (date, minutes) => new Date(date.getTime() + minutes * MINUTE_MS);

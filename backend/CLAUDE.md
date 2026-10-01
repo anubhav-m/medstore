@@ -34,7 +34,7 @@ backend/
     ├── jobs/                 # expireUnconfirmedBills.js, deleteUnusedUploads.js
     ├── routes/               # customer.routes.js (/api/v1), admin.routes.js (/api/v1/admin)
     └── utils/                # AppError, sendSuccess, pagination, time (IST), money, escapeRegex,
-                              # geo (lat/lng ↔ GeoJSON), idParams
+                              # geo (lat/lng ↔ GeoJSON), idParams (+ objectId), phone (Indian phone schema)
 test/                         # mirrors src/; globalSetup.js (memory replica set), setup.js
 ```
 
@@ -215,15 +215,15 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 - Login with username (trimmed, lowercased) + password. The password is checked first (unknown usernames against the dummy hash), then `isActive: false` → `ACCOUNT_DISABLED`, so a wrong password never reveals a disabled account. Record `lastLoginAt`.
 - No account lockout flag. Failed logins are rate-limited instead (`adminLogin`, 5 failed per 15 min per username across all IPs; `adminLoginIp`, 20 failed per 15 min per IP, shared with change-password). Only failed attempts count, so staff sharing a shop's IP don't block each other. Trade-off (accepted): anyone can block new logins for one username for up to 15 minutes; existing sessions keep refreshing.
 - Admin passwords are 12–128 characters (customers 8–128) because admins can see every customer's health data.
-- `middleware/authAdmin.js` exports `authAdmin` (every admin route) and `authAdminAllowPasswordChange` (only change-password and `GET /me`; logout uses the refresh token alone). While `mustChangePassword` is set, `authAdmin` returns `PASSWORD_CHANGE_REQUIRED`. Both set `req.admin = { id }`; the stores feature adds `role` and `storeIds` (read from the database, never the token).
+- `middleware/authAdmin.js` exports `authAdmin` (every admin route) and `authAdminAllowPasswordChange` (only change-password and `GET /me`; logout uses the refresh token alone). While `mustChangePassword` is set, `authAdmin` returns `PASSWORD_CHANGE_REQUIRED`. Both set `req.admin = { id, role, storeIds }` (read from the database on every request, never from the token).
 - `change-password` `{ currentPassword, newPassword }`: wrong current → `INVALID_CREDENTIALS`; a new password equal to the current one → `VALIDATION_ERROR` on `newPassword`. Success clears `mustChangePassword`, revokes every session and returns a fresh pair.
-- `requireRole("OWNER")` guards owner-only routes (`FORBIDDEN` for staff).
-- **Store scoping**: every admin query on orders and item suggestions includes `storeId: { $in: scope }`, where `scope` comes from one helper, `getStoreScope(admin)` (all stores for `OWNER`, `admin.storeIds` for `STAFF`). Out-of-scope resources return 404. Customer and report endpoints are owner-only.
+- `requireRole("OWNER")` guards owner-only routes (`FORBIDDEN` for staff). It runs before `validate`, so staff get `FORBIDDEN` whatever they send.
+- **Store scoping**: every admin query on orders and item suggestions includes `storeId: { $in: scope }`, where `scope` comes from one helper, `getStoreScope(admin)` in `modules/stores/storeScope.js` (an array of store ids: every store, including inactive ones, for `OWNER`; `admin.storeIds` for `STAFF`). Out-of-scope resources return 404. Customer and report endpoints are owner-only.
 
 ### Admin CLI scripts (`backend/scripts/`)
 
-- `npm run admin:create` — prompts for username, name, role, store codes (staff only) and password. Hashes with argon2 and sets `mustChangePassword: true`. **Until the stores feature it creates `OWNER`s only and doesn't ask for a role.**
-- `npm run admin:reset-password` (sets `mustChangePassword`, revokes sessions), `admin:disable` (revokes sessions), `admin:enable`, `admin:set-stores` (replaces a staff member's store codes), `admin:list` (username, name, role, store codes, active — never hashes). `admin:set-stores` and the store-codes column of `admin:list` arrive with the stores feature.
+- `npm run admin:create` — prompts for username, name, role, store codes (staff only) and password. Hashes with argon2 and sets `mustChangePassword: true`. Owners have no store codes (they act on every store); staff need at least one. Codes must name existing stores (inactive ones allowed): the script checks them before the password prompt and re-asks, and `createAdmin` / `setAdminStores` check again (`STORE_NOT_FOUND`).
+- `npm run admin:reset-password` (sets `mustChangePassword`, revokes sessions), `admin:disable` (revokes sessions), `admin:enable`, `admin:set-stores` (replaces a staff member's store codes), `admin:list` (username, role, store codes or `all stores`, active, name — never hashes). `admin:set-stores` works on staff only and needs no sign-out: `storeIds` are read on every request.
 - Passwords are entered in a **hidden prompt**, twice, never as a CLI argument (arguments end up in shell history, including PowerShell's). `scripts/lib/prompt.js` implements it with `node:readline` keypress events plus `process.stdin.setRawMode`; if stdin is not a TTY, `scripts/lib/runAdminScript.js` refuses to run with a clear message (Git Bash's mintty is not a TTY — use PowerShell, Windows Terminal or the VS Code terminal). Answers are validated with the Zod field schemas in `modules/admins/admin.validation.js` and re-asked when invalid.
 - Scripts print with `process.stdout.write` (no `console.*`) and never print a password or hash.
 - Before writing, every script prints the target database host and name and requires typing `yes`.
@@ -260,7 +260,7 @@ Customer — `/api/v1`:
 | `POST /addresses` † | `{ label, line1, line2?, landmark?, city, pincode, lat, lng, isDefault? }` → `{ address }` | `ADDRESS_LIMIT_REACHED` |
 | `PATCH /addresses/:id` † | any of the create fields (`lat` + `lng` together; `null` clears `line2` / `landmark`; `isDefault` only `true`) → `{ address }` | `ADDRESS_NOT_FOUND` |
 | `DELETE /addresses/:id` † | promotes the newest remaining address if the default is deleted | `ADDRESS_NOT_FOUND` |
-| `GET /stores?addressId=` † | active stores with `distanceKm`, `deliversToAddress`, `isOpen`, `nextOpensAt`; not paginated | `ADDRESS_NOT_FOUND` |
+| `GET /stores?addressId=` † | `{ stores: CustomerStore[] }`: active stores nearest first (`$geoNear` from the address pin) with public fields only (`id`, `name`, `address`, `phone`, hours, `deliveryFeePaise`) plus `distanceKm` (1 decimal), `deliversToAddress`, `isOpen`, `nextOpensAt`; not paginated | `ADDRESS_NOT_FOUND` |
 | `POST /uploads/prescriptions` † | `{ contentType, sizeBytes }` → `{ path, signedUrl, token }` | `ACCOUNT_BLOCKED`, `UPLOAD_LIMIT_REACHED` |
 | `POST /orders` † | `Idempotency-Key` header | `ACCOUNT_BLOCKED`, `ADDRESS_NOT_FOUND`, `STORE_NOT_FOUND`, `STORE_NOT_ACCEPTING_ORDERS`, `STORE_CLOSED`, `OUTSIDE_DELIVERY_AREA`, `INVALID_UPLOAD`, `TOO_MANY_OPEN_ORDERS` |
 | `GET /orders?scope=active\|past&page=` † | paginated; no image URLs | — |
@@ -277,7 +277,7 @@ Admin — `/api/v1/admin`:
 | `POST /auth/refresh` | `{ refreshToken }` | `INVALID_TOKEN`, `ACCOUNT_DISABLED` |
 | `POST /auth/logout` | `{ refreshToken, pushToken? }` (`pushToken` arrives with the push-tokens feature); no access token needed; always succeeds | — |
 | `POST /auth/change-password` | `{ currentPassword, newPassword }` → fresh tokens; clears `mustChangePassword` | `INVALID_CREDENTIALS` |
-| `GET /me` | admin + scoped stores `{ id, code, name }` (admin auth returns `{ admin: { id, username, name, role, storeIds, mustChangePassword } }`; the stores feature adds the scoped stores) | — |
+| `GET /me` | `{ admin: { id, username, name, role, storeIds, mustChangePassword }, stores: [{ id, code, name }] }` — `stores` are the scoped stores by code | — |
 | `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body | — |
 | `GET /orders?storeId=&tab=&q=&page=` | `tab` from `ADMIN_ORDER_TABS`; `q` = order number or phone prefix; no image URLs | `STORE_NOT_FOUND` |
 | `GET /orders/counts?storeId=` | count per tab | `STORE_NOT_FOUND` |
@@ -288,9 +288,9 @@ Admin — `/api/v1/admin`:
 | `POST /orders/:id/deliver` | `{ cashCollectedPaise }` | same as above |
 | `POST /orders/:id/fail` · `/cancel` | `{ reasonCode, note? }` | same as above |
 | `GET /item-suggestions?storeId=&q=` | | `STORE_NOT_FOUND` |
-| `GET /stores` | scoped stores (owner: all, including inactive); not paginated | — |
-| `POST /stores` (owner) | | `FORBIDDEN`, `DUPLICATE_RESOURCE` |
-| `PATCH /stores/:id` (owner) | | `FORBIDDEN`, `STORE_NOT_FOUND` |
+| `GET /stores` | `{ stores: AdminStore[] }`: scoped stores by code (owner: all, including inactive); not paginated | — |
+| `POST /stores` (owner) | `{ code, name, address { line1, line2?, city, pincode }, phone, lat, lng, deliveryRadiusKm, openingMinutes, closingMinutes, deliveryFeePaise, isAcceptingOrders?, isActive? }` → `{ store }` | `FORBIDDEN`, `DUPLICATE_RESOURCE` (field `code`) |
+| `PATCH /stores/:id` (owner) | any create field except `code` (sending it is a 400); `address` is replaced whole; `lat` + `lng` together; `openingMinutes` + `closingMinutes` together → `{ store }` | `FORBIDDEN`, `STORE_NOT_FOUND` |
 | `PATCH /customers/:id/block` (owner) | `{ isBlocked }` | `FORBIDDEN`, `CUSTOMER_NOT_FOUND` |
 | `GET /reports/daily?storeId=&date=` (owner) | IST date | `FORBIDDEN`, `STORE_NOT_FOUND` |
 
@@ -311,7 +311,7 @@ users          email (lowercase), emailVerified, passwordHash (select: false; nu
                addressWriteSeq (select: false; $inc'd first in every address-write transaction so
                one customer's address writes run one at a time — cap and single default stay exact)
 addresses      userId, label, line1 (house/flat), line2?, landmark?, city, pincode, location, isDefault
-stores         code, name, address { line1, line2?, city, pincode }, phone, location, deliveryRadiusKm,
+stores         code (immutable), name, address { line1, line2?, city, pincode }, phone, location, deliveryRadiusKm,
                openingMinutes, closingMinutes, deliveryFeePaise, isAcceptingOrders, isActive
 admins         username (lowercase), passwordHash (select: false), name, role (OWNER | STAFF),
                storeIds[], isActive, mustChangePassword, pushTokens[{ token, createdAt }], lastLoginAt
@@ -350,7 +350,8 @@ counters       _id (store code), seq — never reset
 - Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use a transaction (`mongoose.connection.transaction`, which retries transient conflicts) when several documents must change together: onboarding (profile + first address), address writes (user lock + count / default switch + write), order creation/reorder (user lock + count + insert + marking uploads attached) and account deletion. Local and test Mongo run as a single-node replica set.
 - Idempotency: look up `(userId, idempotencyKey)` before anything else; on a duplicate-key error for that index during insert, fetch and return the existing order.
 - Never read-modify-write counters or statuses; use atomic operators and conditional filters.
-- Geo: store locations and address pins are GeoJSON `Point` with `[lng, lat]`. Distance/eligibility uses `$geoNear` from the address point.
+- Geo: store locations and address pins are GeoJSON `Point` with `[lng, lat]`. Distance/eligibility uses `$geoNear` (`spherical: true`) from the address point. `deliversToAddress` compares the **exact** distance in metres with the radius; only the displayed `distanceKm` is rounded.
+- Store hours are edited as a pair (`openingMinutes` + `closingMinutes` together), so opening < closing is checked on the request alone, never against stored values.
 
 ## 9. Integrations
 
@@ -406,6 +407,7 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 - Test env values live in `vitest.config.js` `test.env` (`LOG_LEVEL=silent`, a placeholder `MONGODB_URI` that is never connected to).
 - Build apps with `createApp({ rateLimits })` to use low limits in tests; mock a module with `vi.mock` (e.g. `config/db.js`) rather than reaching into library internals.
 - Every endpoint: at least one success test **and** a test for each domain error code listed for it in section 7.
+- Tests that depend on an index (unique, 2dsphere for `$geoNear`) `await Model.init()` first (e.g. `ensureStoreIndexes` in `test/helpers/store.js`); indexes are built in the background otherwise.
 - The order transition table is tested exhaustively: every allowed transition succeeds, every other pair returns `INVALID_ORDER_TRANSITION`, and concurrent transitions produce exactly one winner and one `ORDER_STATUS_CHANGED`.
 - Concurrency: two simultaneous order creations at 2 open orders produce exactly one success and one `TOO_MANY_OPEN_ORDERS`; two simultaneous requests with the same `Idempotency-Key` produce one order, returned to both.
 - Time and distance logic (`isStoreOpen`, `nextOpensAt`, `billExpiresAt`, radius checks) is tested with injected `now` values around opening and closing boundaries. Where a service reads the clock, use `vi.useFakeTimers({ toFake: ["Date"] })` + `vi.setSystemTime` — faking all timers hangs the Mongo driver.

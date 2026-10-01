@@ -5,7 +5,8 @@ import { fromPoint, toPoint } from "../../utils/geo.js";
 import { User } from "../users/user.model.js";
 import { Address } from "./address.model.js";
 
-const addressNotFound = () => new AppError("Address not found", 404, ErrorCodes.ADDRESS_NOT_FOUND);
+export const addressNotFound = () =>
+  new AppError("Address not found", 404, ErrorCodes.ADDRESS_NOT_FOUND);
 
 const toAddressResponse = (address) => ({
   id: String(address._id),

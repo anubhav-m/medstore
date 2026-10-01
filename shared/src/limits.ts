@@ -42,3 +42,15 @@ export const ADDRESS_CITY_MAX_LENGTH = 60;
 export const PINCODE_PATTERN = /^[1-9]\d{5}$/;
 // Address pins outside this box are rejected.
 export const INDIA_BOUNDS = { minLat: 6.4, maxLat: 37.6, minLng: 68.1, maxLng: 97.5 } as const;
+
+export const STORE_CODE_PATTERN = /^[A-Z0-9]{2,6}$/;
+export const STORE_NAME_MIN_LENGTH = 2;
+export const STORE_NAME_MAX_LENGTH = 80;
+// Mobiles and landlines (with STD code) are both 10 digits. Applied after removing spaces and
+// dashes; the capture group is stored as `+91XXXXXXXXXX`.
+export const STORE_PHONE_INPUT_PATTERN = /^(?:\+91|0)?([1-9]\d{9})$/;
+export const DELIVERY_RADIUS_MIN_KM = 0.5;
+export const DELIVERY_RADIUS_MAX_KM = 50;
+// Store hours are minutes after midnight IST, 0–1440, opening < closing.
+export const MINUTES_PER_DAY = 1440;
+export const DELIVERY_FEE_MAX_PAISE = 100_000;

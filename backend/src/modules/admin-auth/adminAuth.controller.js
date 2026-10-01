@@ -41,8 +41,8 @@ export const changePassword = async (req, res, next) => {
 
 export const getMe = async (req, res, next) => {
   try {
-    const admin = await adminAuthService.getMe(req.admin.id);
-    return sendSuccess(res, { message: "Profile loaded", data: { admin } });
+    const me = await adminAuthService.getMe(req.admin.id);
+    return sendSuccess(res, { message: "Profile loaded", data: me });
   } catch (error) {
     return next(error);
   }

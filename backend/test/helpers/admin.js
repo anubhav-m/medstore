@@ -15,8 +15,10 @@ export const createTestAdmin = async ({
   password = ADMIN_PASSWORD,
   mustChangePassword = false,
   isActive = true,
+  role = AdminRole.OWNER,
+  storeCodes = [],
 } = {}) => {
-  const admin = await createAdmin({ username, name: "Owner One", password, role: AdminRole.OWNER });
+  const admin = await createAdmin({ username, name: "Owner One", password, role, storeCodes });
   await Admin.updateOne({ _id: admin.id }, { $set: { mustChangePassword, isActive } });
   return { ...admin, mustChangePassword };
 };
@@ -29,6 +31,13 @@ export const signInAdmin = async (app, options) => {
   const res = await adminLogin(app, options?.username, options?.password);
   expect(res.status).toBe(200);
   return res.body.data;
+};
+
+// Requests as the admin holding `token`, e.g. api.get("/stores").
+export const adminApi = (app, token) => {
+  const call = (method) => (path) =>
+    request(app)[method](`${ADMIN_API}${path}`).set("Authorization", `Bearer ${token}`);
+  return { get: call("get"), post: call("post"), patch: call("patch") };
 };
 
 export const adminRefresh = (app, refreshToken) =>

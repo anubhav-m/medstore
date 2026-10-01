@@ -36,7 +36,7 @@ describe("GET /admin/me", () => {
     expect(res.body).toEqual({
       success: true,
       message: "Profile loaded",
-      data: { admin: session.admin },
+      data: { admin: session.admin, stores: [] },
     });
     expect(Object.keys(res.body.data.admin).sort()).toEqual(
       ["id", "mustChangePassword", "name", "role", "storeIds", "username"].sort(),
