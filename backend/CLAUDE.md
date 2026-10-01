@@ -180,19 +180,29 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ### Tokens
 
-- Customers and admins are **separate token worlds**: different secrets (4 total: access + refresh for each) and an `aud` claim of `customer` or `admin`. `authCustomer` and `authAdmin` each verify their own secret **and** audience, so a customer token can never pass admin middleware.
-- JWTs are signed and verified with `HS256` only (pass `algorithms: ["HS256"]` to verify). `env.js` requires each secret to be ≥ 32 characters and all four to be distinct.
-- Access tokens: JWT, 15 minutes. Refresh tokens: random opaque strings (`crypto.randomBytes`), stored as SHA-256 hashes, rotated on every use, revoked on logout. Customer refresh lifetime 30 days, admin 7 days. Refresh and logout take the refresh token in the body.
-- Reuse of an already-rotated refresh token revokes all of that subject's sessions. Rotated tokens are kept (revoked) until they expire so reuse can be detected.
+- Customers and admins are **separate token worlds**: different access-token secrets (`JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`) and an `aud` claim of `customer` or `admin`. `authCustomer` and `authAdmin` each verify their own secret **and** audience, so a customer token can never pass admin middleware.
+- JWTs are signed and verified with `HS256` only (pass `algorithms: ["HS256"]` to verify). `env.js` requires every secret (the access-token secrets and `OTP_HMAC_SECRET`) to be ≥ 32 characters and all of them to be distinct.
+- Access tokens: JWT, 15 minutes. Refresh tokens: 32 random bytes (`crypto.randomBytes`, base64url), opaque, so they need no signing secret. They are stored as SHA-256 hashes, rotated on every use and revoked on logout. Customer refresh lifetime 30 days, admin 7 days. Refresh and logout take the refresh token in the body.
+- `modules/auth/session.service.js` holds the refresh-token logic for both worlds (`subjectKind` `CUSTOMER` | `ADMIN`). Rotation is one conditional update (`{ tokenHash, subjectKind, revokedAt: null, expiresAt > now }` → set `revokedAt`).
+- Reuse of an already-rotated refresh token revokes all of that subject's sessions. Rotated tokens are kept (revoked) until they expire so reuse can be detected. An unknown or expired token is just `INVALID_TOKEN`.
 - **The auth middleware loads the subject on every request** (one indexed read). A deleted customer → `INVALID_TOKEN`. An inactive admin → `ACCOUNT_DISABLED`. An admin's `role`, `storeIds` and `mustChangePassword` always come from the database, never from the token, so changes apply immediately.
 - **All of a subject's sessions are revoked** on password reset, password change (the response carries fresh tokens for the current device), admin disable, admin password reset by script, and account deletion.
-- Passwords: argon2id; lengths from root 3.8. Auth failures are generic ("Invalid email or password").
+- Passwords: argon2id (`utils/password.js`); lengths from root 3.8. Auth failures are generic ("Invalid email or password"). An unknown email, or an account without a password, is still verified against a fixed dummy hash, so response time doesn't reveal which emails exist.
 
 ### Customers
 
 - Sign-up, verification, codes and Google linking follow root 3.2 exactly.
-- Google: verify the ID token with `google-auth-library` `verifyIdToken` (audience = `GOOGLE_WEB_CLIENT_ID`) and require `email_verified`. A bad token or an unverified Google email → `INVALID_CREDENTIALS`.
-- OTP codes: from `crypto.randomInt`, one active code per user and purpose (a new code replaces the old document). Never log codes.
+- Google: verify the ID token with `google-auth-library` `verifyIdToken` (audience = `GOOGLE_WEB_CLIENT_ID`) and require `email_verified`. A bad token or an unverified Google email → `INVALID_CREDENTIALS`. An email already linked to a **different** `googleId` → `INVALID_CREDENTIALS`; accounts are never relinked silently.
+- OTP codes (`modules/auth/otp.service.js`):
+  - From `crypto.randomInt`, one active code per user and purpose (a new code replaces the old document).
+  - Stored as HMAC-SHA256 keyed with `OTP_HMAC_SECRET` (a plain hash of 6 digits is reversible offline) and compared with `crypto.timingSafeEqual`.
+  - `expiresAt` is checked in code, not only by the TTL index.
+  - Wrong guesses 1–4 → `INVALID_OR_EXPIRED_CODE`; the 5th deletes the code → `TOO_MANY_ATTEMPTS`. A correct code is consumed by one conditional delete, so it works once.
+  - Never log codes.
+- Code sends: every request to send a code is recorded in `codeSends` **whether or not the email has an account**. The 60 s per email+purpose cooldown and the 5 per email per hour cap (root 3.8) are counted from it, so `429 TOO_MANY_REQUESTS` answers identically for known and unknown emails.
+  - `register`: a provider failure → `503 SERVICE_UNAVAILABLE`. The account is kept and the send released, so `resend-code` works at once.
+  - `resend-code` / `forgot-password`: a provider failure is logged and the generic success returned (a 503 would reveal that the email exists).
+  - `login` on an unverified account sends a code only if the limits allow (silently skipped otherwise) and always answers `EMAIL_NOT_VERIFIED`.
 - `requireOnboarded` guards every customer route except auth, profile and onboarding.
 - Every customer query includes `userId: req.user.id`.
 - Account deletion requires re-authentication with `{ password }` or `{ googleIdToken }` (root 3.2).
@@ -214,7 +224,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ### Rate limits
 
-Values from root 3.8. Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
+Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password) and `refresh`. Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
 
 ## 7. API surface
 
@@ -224,7 +234,7 @@ Customer — `/api/v1`:
 
 | Endpoint | Notes | Domain errors |
 | --- | --- | --- |
-| `POST /auth/register` | `{ email, password }`; sends a code; no tokens | `EMAIL_ALREADY_REGISTERED` |
+| `POST /auth/register` | `{ email, password }`; sends a code; no tokens | `EMAIL_ALREADY_REGISTERED`, `SERVICE_UNAVAILABLE` (email not sent) |
 | `POST /auth/verify-email` | `{ email, code }` → tokens + user | `INVALID_OR_EXPIRED_CODE`, `TOO_MANY_ATTEMPTS` |
 | `POST /auth/resend-code` | `{ email, purpose }`; same response whether or not the email exists | — |
 | `POST /auth/login` | `{ email, password }` → tokens + user | `INVALID_CREDENTIALS`, `EMAIL_NOT_VERIFIED` |
@@ -232,8 +242,8 @@ Customer — `/api/v1`:
 | `POST /auth/forgot-password` | `{ email }`; same response whether or not the email exists | — |
 | `POST /auth/reset-password` | `{ email, code, newPassword }`; revokes all sessions; no tokens | `INVALID_OR_EXPIRED_CODE`, `TOO_MANY_ATTEMPTS` |
 | `POST /auth/refresh` | `{ refreshToken }` → new pair | `INVALID_TOKEN` |
-| `POST /auth/logout` | `{ refreshToken, pushToken? }` | — |
-| `GET /me` | profile incl. `onboardingCompleted`, `isBlocked`, `hasPassword` | — |
+| `POST /auth/logout` | `{ refreshToken, pushToken? }` (`pushToken` arrives with the push-tokens feature); always succeeds | — |
+| `GET /me` | profile incl. `onboardingCompleted`, `isBlocked`, `hasPassword` (customer auth returns `{ id, email, emailVerified, onboardingCompleted }`; onboarding extends it) | — |
 | `PATCH /me` | name, phone, dob, gender | — |
 | `POST /me/password` | `{ currentPassword, newPassword }` → fresh tokens | `INVALID_CREDENTIALS` (also when the account has no password) |
 | `DELETE /me` | `{ password }` or `{ googleIdToken }` | `INVALID_CREDENTIALS`, `ACCOUNT_HAS_OPEN_ORDERS` |
@@ -307,7 +317,8 @@ orders         orderNumber, userId, storeId, status, idempotencyKey, reorderedFr
                deliveryFailure? { code, note }, statusHistory[{ status, at, by { kind, id? }, note? }]
 uploads        userId, path, contentType, sizeBytes, attachedAt? (set when first used by an order)
 refreshTokens  tokenHash, subjectKind (CUSTOMER | ADMIN), subjectId, expiresAt, revokedAt?
-otpCodes       userId, purpose (VERIFY_EMAIL | RESET_PASSWORD), codeHash, attempts, expiresAt
+otpCodes       userId, purpose (VERIFY_EMAIL | RESET_PASSWORD), codeHash (HMAC), attempts, expiresAt
+codeSends      email, purpose — one per code-send request, kept 1 hour (per-email send limits)
 counters       _id (store code), seq — never reset
 ```
 
@@ -323,6 +334,7 @@ counters       _id (store code), seq — never reset
   - `uploads`: `path` unique; `{ userId, createdAt }`; `{ attachedAt, createdAt }` (cleanup job)
   - `refreshTokens`: `tokenHash` unique; `{ subjectKind, subjectId }`; TTL on `expiresAt`
   - `otpCodes`: `{ userId, purpose }` unique; TTL on `expiresAt`
+  - `codeSends`: `{ email, createdAt }`; TTL of 1 hour on `createdAt`
 - **Every unbounded list endpoint is paginated** (default 20, max 100). Bounded lists (addresses ≤ 10, stores) are not. Never `Model.find()` without a limit.
 - Reads use `.lean()` and projections. No N+1 loops — use `$in` or aggregation.
 - Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use `session.withTransaction` when several documents must change together: order creation/reorder (user lock + count + insert + marking uploads attached) and account deletion. Local and test Mongo run as a single-node replica set.
@@ -395,8 +407,7 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 
 ```text
 NODE_ENV  PORT  LOG_LEVEL  TRUST_PROXY  MONGODB_URI
-JWT_CUSTOMER_ACCESS_SECRET  JWT_CUSTOMER_REFRESH_SECRET
-JWT_ADMIN_ACCESS_SECRET     JWT_ADMIN_REFRESH_SECRET
+JWT_CUSTOMER_ACCESS_SECRET  JWT_ADMIN_ACCESS_SECRET  OTP_HMAC_SECRET
 GOOGLE_WEB_CLIENT_ID
 SUPABASE_URL  SUPABASE_SECRET_KEY  SUPABASE_BUCKET
 EMAIL_API_KEY  EMAIL_FROM
@@ -406,7 +417,7 @@ BILL_CONFIRMATION_TIMEOUT_MINUTES     # 60 in .env.example
 
 All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
 
-**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`. Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
+**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
 
 Local development uses a separate Atlas dev cluster (or Docker `mongo` started with `--replSet rs0`). A MongoDB installed as a Windows service starts standalone; it needs `replication.replSetName` in `mongod.cfg` and a one-time `rs.initiate()` before transactions work.
 

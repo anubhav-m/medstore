@@ -30,6 +30,27 @@ describe("logger redaction", () => {
     expect(logged.order.deliveryAddress).toBe("[REDACTED]");
   });
 
+  it("redacts auth request bodies: passwords, codes and tokens", () => {
+    const logged = captureLog({
+      req: {
+        body: {
+          email: "asha@example.com",
+          password: "hunter22",
+          newPassword: "hunter23",
+          code: "654321",
+          idToken: "google-id-token",
+          refreshToken: "refresh-secret",
+        },
+      },
+      session: { accessToken: "access-secret" },
+    });
+
+    for (const key of ["password", "newPassword", "code", "idToken", "refreshToken"]) {
+      expect(logged.req.body[key]).toBe("[REDACTED]");
+    }
+    expect(logged.session.accessToken).toBe("[REDACTED]");
+  });
+
   it("keeps error codes visible", () => {
     const logged = captureLog({ code: "VALIDATION_ERROR", err: { code: "STORE_CLOSED" } });
     expect(logged.code).toBe("VALIDATION_ERROR");

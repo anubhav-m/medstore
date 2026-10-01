@@ -277,6 +277,7 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 | Order creations + reorders per customer | 10 per hour |
 | Code resend | 60 s cooldown, 5 per email per hour; 5 attempts per code; 10-minute expiry |
 | Login attempts | customer: 10 per 15 min per IP+email; admin: 5 failed per 15 min per username, plus per IP |
+| Email | ≤ 254 chars, trimmed and lowercased |
 | Customer password / admin password | 8–128 / 12–128 chars |
 | Admin username | 3–30 chars, lowercase letters, digits, `.` `_` |
 | Names | customer 2–80 chars; patient 2–100 chars |

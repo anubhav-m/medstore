@@ -8,8 +8,11 @@ import { createRateLimit } from "./middleware/rateLimit.js";
 import { requestId } from "./middleware/requestId.js";
 import { requestLogger } from "./middleware/requestLogger.js";
 import { healthRoutes } from "./modules/health/health.routes.js";
+import { createCustomerRoutes } from "./routes/customer.routes.js";
 
-export const createApp = ({ rateLimits = defaultRateLimits } = {}) => {
+// Tests pass only the limits they lower; the rest keep their defaults.
+export const createApp = ({ rateLimits: overrides } = {}) => {
+  const rateLimits = { ...defaultRateLimits, ...overrides };
   const app = express();
   app.disable("x-powered-by");
   app.set("trust proxy", env.TRUST_PROXY);
@@ -22,6 +25,7 @@ export const createApp = ({ rateLimits = defaultRateLimits } = {}) => {
   app.use(express.json({ limit: "100kb" }));
 
   app.use(healthRoutes);
+  app.use("/api/v1", createCustomerRoutes(rateLimits));
 
   app.use(notFound);
   app.use(errorHandler);

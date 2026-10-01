@@ -1,13 +1,14 @@
 import { ErrorCodes } from "@medstore/shared";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { AppError } from "../utils/AppError.js";
 
-export const createRateLimit = ({ windowMs, limit }) =>
+export const createRateLimit = ({ windowMs, limit }, { keyGenerator } = {}) =>
   rateLimit({
     windowMs,
     limit,
     standardHeaders: "draft-8",
     legacyHeaders: false,
+    ...(keyGenerator && { keyGenerator }),
     handler: (_req, _res, next) =>
       next(
         new AppError(
@@ -17,3 +18,10 @@ export const createRateLimit = ({ windowMs, limit }) =>
         ),
       ),
   });
+
+// Runs before validation, so the body may be anything; a non-string email counts as "".
+export const ipAndEmailKey = (req) => {
+  const email = req.body?.email;
+  const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+  return `${ipKeyGenerator(req.ip)}|${normalized}`;
+};
