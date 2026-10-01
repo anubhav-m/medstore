@@ -24,3 +24,21 @@ export const ADMIN_NAME_MAX_LENGTH = 80;
 // Longer than customers': admins can see every customer's health data.
 export const ADMIN_PASSWORD_MIN_LENGTH = 12;
 export const ADMIN_PASSWORD_MAX_LENGTH = 128;
+
+export const CUSTOMER_NAME_MIN_LENGTH = 2;
+export const CUSTOMER_NAME_MAX_LENGTH = 80;
+// Applied after removing spaces and dashes; the capture group is the 10-digit number, stored as
+// `+91XXXXXXXXXX`.
+export const INDIAN_MOBILE_INPUT_PATTERN = /^(?:\+91|0)?([6-9]\d{9})$/;
+export const INDIAN_PHONE_PREFIX = "+91";
+// Earliest accepted date of birth (inclusive); it must also be before today in IST.
+export const DOB_MIN = "1900-01-01";
+
+export const MAX_ADDRESSES = 10;
+export const ADDRESS_LABEL_MAX_LENGTH = 30;
+export const ADDRESS_LINE_MAX_LENGTH = 120;
+export const ADDRESS_LANDMARK_MAX_LENGTH = 120;
+export const ADDRESS_CITY_MAX_LENGTH = 60;
+export const PINCODE_PATTERN = /^[1-9]\d{5}$/;
+// Address pins outside this box are rejected.
+export const INDIA_BOUNDS = { minLat: 6.4, maxLat: 37.6, minLng: 68.1, maxLng: 97.5 } as const;

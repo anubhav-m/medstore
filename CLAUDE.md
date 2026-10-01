@@ -139,8 +139,14 @@ Reports are **owner-only**. Admins are created and managed only with the backend
 - **Codes** (email verification and password reset): 6 digits, stored hashed, expire in 10 minutes, at most 5 attempts per code. A new code invalidates the previous one. Resend cooldown 60 seconds, max 5 codes per email per hour. Forgot-password and resend responses never reveal whether the email exists.
 - **Passwords**: Google-only accounts may set a password through forgot-password. Signed-in customers change their password with the current one. A reset or change revokes every other session.
 - **Onboarding** (once, after first sign-in): full name, mobile number (Indian, 10 digits starting 6–9, stored as `+91XXXXXXXXXX`, unverified in v1), first delivery address with a map pin, and acceptance of terms & privacy policy (stores `consentAcceptedAt` and `consentVersion` = `CONSENT_VERSION` from `shared`). This sets `onboardingCompleted`. Date of birth and gender are optional profile fields and are never asked during onboarding.
+  - Profile, consent and the first address (as the default) are saved in one transaction; a second onboarding → `409 ONBOARDING_ALREADY_COMPLETED`.
+  - Phone input may be `9876543210`, `+919876543210` or `09876543210`, with spaces or dashes (`INDIAN_MOBILE_INPUT_PATTERN`, applied after removing them).
+  - Date of birth: a real `YYYY-MM-DD` date from `DOB_MIN` (1900-01-01) to yesterday in IST. Gender: `MALE`, `FEMALE` or `OTHER`; leaving it out means "prefer not to say". `null` clears either.
+  - `PATCH /me` changes only name, phone, date of birth and gender.
 - Until onboarding is complete, everything except auth, profile and onboarding returns `403 ONBOARDING_REQUIRED`.
-- **Addresses**: at most 10 per customer. House/flat and pincode are required. Deleting the default address makes the most recently created remaining one the default. Editing or deleting addresses never changes existing orders (orders hold a copy).
+- **Addresses**: at most 10 per customer (`409 ADDRESS_LIMIT_REACHED`). Label (free text), house/flat (`line1`), city and pincode are required; `line2` and landmark are optional. The pin must lie inside `INDIA_BOUNDS`. Deleting the default address makes the most recently created remaining one the default. Editing or deleting addresses never changes existing orders (orders hold a copy).
+  - Exactly one default whenever the customer has an address. A new address becomes the default when asked or when it is the only one; moving the default unsets the old one in the same transaction. The default can be moved but never unset (`PATCH` accepts only `isDefault: true`).
+  - Deleting the last address is allowed.
 - **Blocked** customers can sign in, see their history, and confirm or cancel orders already in progress. They cannot request upload URLs, place orders or reorder (`403 ACCOUNT_BLOCKED`). Blocking doesn't change existing orders.
 - **Account deletion** is available in the customer app (Google Play requirement):
   - Requires re-authentication: the current password, or a fresh Google ID token for accounts without a password.
@@ -283,6 +289,8 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 | Names | customer 2–80 chars; admin 2–80 chars; patient 2–100 chars |
 | Customer note / reason note | ≤ 500 / ≤ 300 chars |
 | Address label / line1 / line2 / landmark / city | ≤ 30 / 120 / 120 / 120 / 60 chars; pincode 6 digits, not starting with 0 |
+| Address pin | inside India: lat 6.4–37.6, lng 68.1–97.5 (`INDIA_BOUNDS`) |
+| Date of birth | 1900-01-01 to yesterday (IST) |
 | Bill | 1–50 items; name 2–100 chars; quantity 1–999; unit price 1–10,000,000 paise; delivery fee 0–100,000 paise |
 | Delivery radius | 0.5–50 km, one decimal |
 | Search / suggestion query | 1–50 chars; suggestions max 10 |

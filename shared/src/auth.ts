@@ -62,8 +62,3 @@ export interface AuthSession {
   refreshToken: string;
   user: AuthUser;
 }
-
-/** `data` of GET /me. */
-export interface MeResponse {
-  user: AuthUser;
-}

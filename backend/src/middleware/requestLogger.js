@@ -1,12 +1,28 @@
 import { pinoHttp } from "pino-http";
 import { logger } from "../config/logger.js";
 
-// The route pattern, never the raw URL: query strings can carry phone numbers.
-const routeOf = (req) => (req.route ? `${req.baseUrl}${req.route.path}` : "unmatched");
+// Express resets req.baseUrl as a request leaves each router, so when a failed request is logged
+// (after the central error handler) only the innermost path would remain. The router assigns
+// req.route at the moment it matches, while req.baseUrl still holds the full mount path, so the
+// whole pattern is recorded then.
+export const recordRoutePattern = (req, _res, next) => {
+  let route;
+  Object.defineProperty(req, "route", {
+    configurable: true,
+    enumerable: true,
+    get: () => route,
+    set: (value) => {
+      route = value;
+      req.routePattern = `${req.baseUrl}${value.path}`;
+    },
+  });
+  return next();
+};
 
+// The route pattern, never the raw URL: query strings can carry phone numbers.
 const summarize = (req, res, { responseTime }) => ({
   method: req.method,
-  route: routeOf(req),
+  route: req.routePattern ?? "unmatched",
   statusCode: res.statusCode,
   responseTime,
 });
@@ -17,7 +33,7 @@ const levelFor = (_req, res, error) => {
   return "info";
 };
 
-export const requestLogger = pinoHttp({
+const httpLogger = pinoHttp({
   logger,
   quietReqLogger: true,
   quietResLogger: true,
@@ -27,3 +43,5 @@ export const requestLogger = pinoHttp({
   customSuccessMessage: () => "request completed",
   customErrorMessage: () => "request failed",
 });
+
+export const requestLogger = [httpLogger, recordRoutePattern];

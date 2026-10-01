@@ -5,9 +5,10 @@ import { User } from "../modules/users/user.model.js";
 export const authCustomer = async (req, _res, next) => {
   try {
     const userId = verifyAccessToken(req.get("authorization"), SubjectKind.CUSTOMER);
-    if (!(await User.exists({ _id: userId }))) throw invalidToken();
+    const user = await User.findById(userId).select("onboardingCompleted").lean();
+    if (!user) throw invalidToken();
 
-    req.user = { id: userId };
+    req.user = { id: userId, onboardingCompleted: user.onboardingCompleted };
     return next();
   } catch (error) {
     return next(error);

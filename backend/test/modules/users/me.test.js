@@ -1,11 +1,13 @@
-import { ErrorCodes } from "@medstore/shared";
+import { CONSENT_VERSION, ErrorCodes } from "@medstore/shared";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../../src/app.js";
+import { issueCustomerSession } from "../../../src/modules/auth/session.service.js";
 import { User } from "../../../src/modules/users/user.model.js";
 import { API, advanceTime, registerAndVerify } from "../../helpers/auth.js";
+import { ONBOARDING, onboardedCustomer } from "../../helpers/customer.js";
 
 vi.mock("../../../src/services/email.js", () => ({ sendCodeEmail: vi.fn() }));
 
@@ -36,7 +38,7 @@ const expectCode = (res, status, code) => {
 };
 
 describe("GET /me", () => {
-  it("returns the signed-in user", async () => {
+  it("returns the full profile of a new email account", async () => {
     const session = await registerAndVerify(app, EMAIL);
     const res = await getMe(`Bearer ${session.accessToken}`);
 
@@ -44,7 +46,42 @@ describe("GET /me", () => {
     expect(res.body).toEqual({
       success: true,
       message: "Profile loaded",
-      data: { user: session.user },
+      data: {
+        user: {
+          ...session.user,
+          isBlocked: false,
+          hasPassword: true,
+          name: null,
+          phone: null,
+          dob: null,
+          gender: null,
+          consentAcceptedAt: null,
+          consentVersion: null,
+        },
+      },
+    });
+    expect(JSON.stringify(res.body)).not.toMatch(/passwordHash|addressWriteSeq/);
+  });
+
+  it("reports hasPassword false for a Google-only account", async () => {
+    const user = await User.create({ email: EMAIL, emailVerified: true, googleId: "google-1" });
+    const { accessToken } = await issueCustomerSession(user);
+    const res = await getMe(`Bearer ${accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.user).toMatchObject({ hasPassword: false, isBlocked: false });
+  });
+
+  it("returns the onboarded profile", async () => {
+    const { api } = await onboardedCustomer(app, EMAIL);
+    const res = await api.get("/me");
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.user).toMatchObject({
+      onboardingCompleted: true,
+      name: ONBOARDING.name,
+      phone: "+919876543210",
+      consentVersion: CONSENT_VERSION,
     });
   });
 

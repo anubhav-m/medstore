@@ -33,7 +33,8 @@ backend/
     ├── services/             # integrations only: storage.js, email.js, push.js, googleAuth.js
     ├── jobs/                 # expireUnconfirmedBills.js, deleteUnusedUploads.js
     ├── routes/               # customer.routes.js (/api/v1), admin.routes.js (/api/v1/admin)
-    └── utils/                # AppError, sendSuccess, pagination, time (IST), money, escapeRegex
+    └── utils/                # AppError, sendSuccess, pagination, time (IST), money, escapeRegex,
+                              # geo (lat/lng ↔ GeoJSON), idParams
 test/                         # mirrors src/; globalSetup.js (memory replica set), setup.js
 ```
 
@@ -114,6 +115,7 @@ export const confirmBill = async (req, res, next) => {
 | Zod validation failure                     | 400     | `VALIDATION_ERROR` (+ per-field `errors`)              |
 | Mongoose `ValidationError`                 | 400     | `VALIDATION_ERROR` (+ per-field `errors`)              |
 | Mongoose `CastError` (bad ObjectId)        | 400     | `INVALID_ID`                                           |
+| Malformed `:id` path param (`validate`)    | 400     | `INVALID_ID`                                           |
 | Mongo duplicate key (`code 11000`)         | 409     | `DUPLICATE_RESOURCE` (name the field, never the value) |
 | Malformed JSON (`entity.parse.failed`)     | 400     | `INVALID_JSON`                                         |
 | Body too large (`entity.too.large`)        | 413     | `PAYLOAD_TOO_LARGE`                                    |
@@ -170,8 +172,9 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ## 5. Validation
 
-- Every route validates `body`, `params`, `query` **and the headers it reads** with Zod via the `validate` middleware. Schemas are strict (unknown keys rejected), strings trimmed, sizes bounded by the limits in root 3.8. `Idempotency-Key` is a required UUID on `POST /orders` and `POST /orders/:id/reorder`.
+- Every route validates `body`, `params`, `query` **and the headers it reads** with Zod via the `validate` middleware. Schemas are strict (unknown keys rejected; the error handler reports each unknown key as its own `field`, e.g. `address.userId`), strings trimmed, sizes bounded by the limits in root 3.8. `Idempotency-Key` is a required UUID on `POST /orders` and `POST /orders/:id/reorder`.
 - Validated data goes on `req.validated`. Do not reassign `req.query` (read-only in Express 5).
+- Path params are always ObjectIds, validated with `idParamsSchema` (`utils/idParams.js`). `validate` turns a `params` failure into `400 INVALID_ID`, never `VALIDATION_ERROR`.
 - Never pass `req.body` / `req.query` straight into Mongoose. Destructure the fields you need; strict schemas also block NoSQL operator injection (`{ "$ne": null }`).
 - User text used in a regex (order search, item suggestions) always goes through `utils/escapeRegex` and is anchored as a prefix (`^`).
 - Rupee inputs never exist on the API — money fields are integer paise.
@@ -203,7 +206,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
   - `register`: a provider failure → `503 SERVICE_UNAVAILABLE`. The account is kept and the send released, so `resend-code` works at once.
   - `resend-code` / `forgot-password`: a provider failure is logged and the generic success returned (a 503 would reveal that the email exists).
   - `login` on an unverified account sends a code only if the limits allow (silently skipped otherwise) and always answers `EMAIL_NOT_VERIFIED`.
-- `requireOnboarded` guards every customer route except auth, profile and onboarding.
+- `authCustomer` sets `req.user = { id, onboardingCompleted }` from its one read. `requireOnboarded` (after it) guards every customer route except auth, profile and onboarding.
 - Every customer query includes `userId: req.user.id`.
 - Account deletion requires re-authentication with `{ password }` or `{ googleIdToken }` (root 3.2).
 
@@ -247,15 +250,16 @@ Customer — `/api/v1`:
 | `POST /auth/reset-password` | `{ email, code, newPassword }`; revokes all sessions; no tokens | `INVALID_OR_EXPIRED_CODE`, `TOO_MANY_ATTEMPTS` |
 | `POST /auth/refresh` | `{ refreshToken }` → new pair | `INVALID_TOKEN` |
 | `POST /auth/logout` | `{ refreshToken, pushToken? }` (`pushToken` arrives with the push-tokens feature); always succeeds | — |
-| `GET /me` | profile incl. `onboardingCompleted`, `isBlocked`, `hasPassword` (customer auth returns `{ id, email, emailVerified, onboardingCompleted }`; onboarding extends it) | — |
-| `PATCH /me` | name, phone, dob, gender | — |
+| `GET /me` | `{ user: CustomerProfile }`: auth fields + `isBlocked`, `hasPassword`, `name`, `phone`, `dob`, `gender`, `consentAcceptedAt`, `consentVersion` (auth endpoints still return `AuthUser`) | — |
+| `PATCH /me` | `{ name?, phone?, dob?, gender? }`, at least one; `null` clears `dob` / `gender` | — |
 | `POST /me/password` | `{ currentPassword, newPassword }` → fresh tokens | `INVALID_CREDENTIALS` (also when the account has no password) |
 | `DELETE /me` | `{ password }` or `{ googleIdToken }` | `INVALID_CREDENTIALS`, `ACCOUNT_HAS_OPEN_ORDERS` |
-| `POST /me/onboarding` | name, phone, first address, `consentAccepted: true` | `ONBOARDING_ALREADY_COMPLETED` |
+| `POST /me/onboarding` | `{ name, phone, address, consentAccepted: true }` → `{ user, address }` | `ONBOARDING_ALREADY_COMPLETED` |
 | `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body (never in the URL) | — |
-| `GET /addresses` † | all (≤ 10), not paginated | — |
-| `POST /addresses` † | | `ADDRESS_LIMIT_REACHED` |
-| `PATCH /addresses/:id` · `DELETE /addresses/:id` † | | `ADDRESS_NOT_FOUND` |
+| `GET /addresses` † | all (≤ 10), default first then newest; not paginated | — |
+| `POST /addresses` † | `{ label, line1, line2?, landmark?, city, pincode, lat, lng, isDefault? }` → `{ address }` | `ADDRESS_LIMIT_REACHED` |
+| `PATCH /addresses/:id` † | any of the create fields (`lat` + `lng` together; `null` clears `line2` / `landmark`; `isDefault` only `true`) → `{ address }` | `ADDRESS_NOT_FOUND` |
+| `DELETE /addresses/:id` † | promotes the newest remaining address if the default is deleted | `ADDRESS_NOT_FOUND` |
 | `GET /stores?addressId=` † | active stores with `distanceKm`, `deliversToAddress`, `isOpen`, `nextOpensAt`; not paginated | `ADDRESS_NOT_FOUND` |
 | `POST /uploads/prescriptions` † | `{ contentType, sizeBytes }` → `{ path, signedUrl, token }` | `ACCOUNT_BLOCKED`, `UPLOAD_LIMIT_REACHED` |
 | `POST /orders` † | `Idempotency-Key` header | `ACCOUNT_BLOCKED`, `ADDRESS_NOT_FOUND`, `STORE_NOT_FOUND`, `STORE_NOT_ACCEPTING_ORDERS`, `STORE_CLOSED`, `OUTSIDE_DELIVERY_AREA`, `INVALID_UPLOAD`, `TOO_MANY_OPEN_ORDERS` |
@@ -300,10 +304,12 @@ All schemas use `timestamps: true`. Money fields are integer paise. Locations ar
 
 ```text
 users          email (lowercase), emailVerified, passwordHash (select: false; null for Google-only),
-               googleId?, name, phone (+91XXXXXXXXXX), dob?, gender? (MALE | FEMALE | OTHER),
+               googleId?, name, phone (+91XXXXXXXXXX), dob? (UTC midnight), gender? (MALE | FEMALE | OTHER),
                onboardingCompleted, consentAcceptedAt, consentVersion, isBlocked,
                pushTokens[{ token, createdAt }], orderCreateSeq (written inside the order-creation
-               transaction so concurrent creates conflict — root 3.4 check 6)
+               transaction so concurrent creates conflict — root 3.4 check 6),
+               addressWriteSeq (select: false; $inc'd first in every address-write transaction so
+               one customer's address writes run one at a time — cap and single default stay exact)
 addresses      userId, label, line1 (house/flat), line2?, landmark?, city, pincode, location, isDefault
 stores         code, name, address { line1, line2?, city, pincode }, phone, location, deliveryRadiusKm,
                openingMinutes, closingMinutes, deliveryFeePaise, isAcceptingOrders, isActive
@@ -333,7 +339,7 @@ counters       _id (store code), seq — never reset
   - `users`: `email` unique; `googleId` unique sparse
   - `admins`: `username` unique
   - `stores`: `code` unique; `location` 2dsphere
-  - `addresses`: `userId`
+  - `addresses`: `{ userId, createdAt: -1 }`; `userId` unique with `partialFilterExpression: { isDefault: true }` (at most one default, enforced by the database)
   - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks)
   - `uploads`: `path` unique; `{ userId, createdAt }`; `{ attachedAt, createdAt }` (cleanup job)
   - `refreshTokens`: `tokenHash` unique; `{ subjectKind, subjectId }`; TTL on `expiresAt`
@@ -341,7 +347,7 @@ counters       _id (store code), seq — never reset
   - `codeSends`: `{ email, createdAt }`; TTL of 1 hour on `createdAt`
 - **Every unbounded list endpoint is paginated** (default 20, max 100). Bounded lists (addresses ≤ 10, stores) are not. Never `Model.find()` without a limit.
 - Reads use `.lean()` and projections. No N+1 loops — use `$in` or aggregation.
-- Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use `session.withTransaction` when several documents must change together: order creation/reorder (user lock + count + insert + marking uploads attached) and account deletion. Local and test Mongo run as a single-node replica set.
+- Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use a transaction (`mongoose.connection.transaction`, which retries transient conflicts) when several documents must change together: onboarding (profile + first address), address writes (user lock + count / default switch + write), order creation/reorder (user lock + count + insert + marking uploads attached) and account deletion. Local and test Mongo run as a single-node replica set.
 - Idempotency: look up `(userId, idempotencyKey)` before anything else; on a duplicate-key error for that index during insert, fetch and return the existing order.
 - Never read-modify-write counters or statuses; use atomic operators and conditional filters.
 - Geo: store locations and address pins are GeoJSON `Point` with `[lng, lat]`. Distance/eligibility uses `$geoNear` from the address point.
@@ -389,7 +395,7 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 
 - `helmet()`, `x-powered-by` disabled, 100 kb body limit (no files pass through the API), rate limiting.
 - **CORS**: native apps are not subject to CORS, so no CORS middleware is installed. If a web client is added later, add an allow-list from a new env var — never bare `cors()`.
-- Pino + `pino-http` (`quietReqLogger`/`quietResLogger`, so `req.log` is bound to `reqId` only) with a request id on every line. Request logs record method, **route pattern** (`req.baseUrl + req.route.path`, or `unmatched`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, codes, phone, address, patient name, notes and bill items (top level and up to two levels deep). `code` is redacted **only** under `req.body` / `body` (OTP codes) — elsewhere it carries error codes that logs must keep. No `console.*`.
+- Pino + `pino-http` (`quietReqLogger`/`quietResLogger`, so `req.log` is bound to `reqId` only) with a request id on every line. Request logs record method, **route pattern** (`req.baseUrl + req.route.path` captured by `recordRoutePattern` when the router matches — Express resets `baseUrl` before a failed request is logged — or `unmatched`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, codes, phone, address, patient name, notes and bill items (top level and up to two levels deep). `code` is redacted **only** under `req.body` / `body` (OTP codes) — elsewhere it carries error codes that logs must keep. No `console.*`.
 - `GET /health` reports process + DB readiness as `{ status, db }` — no versions, hostnames or error details.
 - Graceful shutdown on `SIGTERM`/`SIGINT`: stop accepting connections, clear jobs, finish in-flight requests, close Mongo, exit (with a hard timeout). Windows has no `SIGTERM` — test shutdown locally with Ctrl+C (`SIGINT`); `node --watch` restarts without running the handler.
 

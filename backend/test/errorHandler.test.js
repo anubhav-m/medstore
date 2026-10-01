@@ -47,6 +47,32 @@ describe("errorHandler classifier", () => {
     expect(res.body.errors).toEqual([{ field: "phone", message: expect.any(String) }]);
   });
 
+  it("names each unknown key of a strict schema as its own field, nested ones by path", async () => {
+    const schema = z.strictObject({
+      name: z.string(),
+      address: z.strictObject({ city: z.string() }),
+    });
+    const error = catchError(() =>
+      schema.parse({
+        name: "Asha",
+        isBlocked: true,
+        role: "OWNER",
+        address: { city: "Pune", userId: "x" },
+      }),
+    );
+    const res = await respondWith(error);
+
+    expect(res.status).toBe(400);
+    expect(res.body.errors).toEqual(
+      expect.arrayContaining([
+        { field: "isBlocked", message: "This field is not allowed" },
+        { field: "role", message: "This field is not allowed" },
+        { field: "address.userId", message: "This field is not allowed" },
+      ]),
+    );
+    expect(res.body.errors).toHaveLength(3);
+  });
+
   it("maps a Mongoose ValidationError to 400 VALIDATION_ERROR without echoing values", async () => {
     let error;
     try {

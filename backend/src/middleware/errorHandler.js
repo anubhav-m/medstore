@@ -23,8 +23,17 @@ const mongooseFieldErrors = (error) =>
     message: fieldError instanceof mongoose.Error.CastError ? "Invalid value" : fieldError.message,
   }));
 
+// Strict schemas report all unknown keys in one issue at the object's path; each key gets its own
+// entry so clients can point at the field.
 const zodFieldErrors = (error) =>
-  error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message }));
+  error.issues.flatMap((issue) =>
+    issue.code === "unrecognized_keys"
+      ? issue.keys.map((key) => ({
+          field: [...issue.path, key].join("."),
+          message: "This field is not allowed",
+        }))
+      : [{ field: issue.path.join("."), message: issue.message }],
+  );
 
 // Names the field, never the value.
 const duplicateKeyError = (error) => {
