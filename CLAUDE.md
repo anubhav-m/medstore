@@ -148,6 +148,7 @@ Reports are **owner-only**. Admins are created and managed only with the backend
   - Exactly one default whenever the customer has an address. A new address becomes the default when asked or when it is the only one; moving the default unsets the old one in the same transaction. The default can be moved but never unset (`PATCH` accepts only `isDefault: true`).
   - Deleting the last address is allowed.
 - **Blocked** customers can sign in, see their history, and confirm or cancel orders already in progress. They cannot request upload URLs, place orders or reorder (`403 ACCOUNT_BLOCKED`). Blocking doesn't change existing orders.
+  - The owner blocks or unblocks (`PATCH /api/v1/admin/customers/:id/block`), optionally with a reason when blocking. Blocking records `blockedAt`, `blockedBy` (the admin) and `blockReason`; blocking again replaces them; unblocking clears them. The response carries only the block state, and the customer never sees the reason.
 - **Account deletion** is available in the customer app (Google Play requirement):
   - Requires re-authentication: the current password, or a fresh Google ID token for accounts without a password.
   - Refused with `409 ACCOUNT_HAS_OPEN_ORDERS` while any non-terminal order exists.
@@ -250,7 +251,7 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 - Order numbers are `{storeCode}-{6-digit sequence}` (e.g. `ST01-000042`) from an atomic `$inc` on one counter per store that **never resets**. Gaps are acceptable.
 - Store hours gate **new** orders and reorders only. Orders already placed continue after closing.
 - `DELIVERED` sets `paymentStatus: COLLECTED`, `deliveredAt`, and records `cashCollectedPaise` (integer ≥ 0, may differ from the total — it is recorded as given).
-- **Daily report** (owner-only), per store for one IST date: counts of orders created that day by status; and for orders whose `deliveredAt` falls on that day, expected cash (sum of `totalPaise`) vs collected cash (sum of `cashCollectedPaise`) and the difference.
+- **Daily report** (owner-only, any store including inactive ones), per store for one IST date (IST midnight to midnight; not in the future): counts of orders created that day by their current status; and for orders whose `deliveredAt` falls on that day, the delivered count, expected cash (sum of `totalPaise`) vs collected cash (sum of `cashCollectedPaise`) and the difference (collected − expected), plus the orders where collected ≠ expected (order number and both amounts; oldest delivery first, at most `MAX_REPORT_CASH_MISMATCHES` = 100 listed, all counted).
 
 ### 3.5 Prescription images & privacy
 - Images live in the **private** Supabase bucket named by `SUPABASE_BUCKET` (`prescriptions`) at the path `{userId}/{uuid}.{ext}`. The bucket is never public and there are never public URLs.
@@ -303,7 +304,8 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 | Customer password / admin password | 8–128 / 12–128 chars (admins see every customer's health data) |
 | Admin username | 3–30 chars, lowercase letters, digits, `.` `_` |
 | Names | customer 2–80 chars; admin 2–80 chars; patient 2–100 chars |
-| Customer note / reason note | ≤ 500 / ≤ 300 chars |
+| Customer note / reason note / block reason | ≤ 500 / ≤ 300 / ≤ 300 chars |
+| Cash mismatches listed in a daily report | 100 (all are counted) |
 | Address label / line1 / line2 / landmark / city | ≤ 30 / 120 / 120 / 120 / 60 chars; pincode 6 digits, not starting with 0 |
 | Address pin | inside India: lat 6.4–37.6, lng 68.1–97.5 (`INDIA_BOUNDS`) |
 | Date of birth | 1900-01-01 to yesterday (IST) |

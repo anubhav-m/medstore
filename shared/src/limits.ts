@@ -18,6 +18,10 @@ export const CUSTOMER_NOTE_MAX_LENGTH = 500;
 export const PATIENT_NAME_MIN_LENGTH = 2;
 export const PATIENT_NAME_MAX_LENGTH = 100;
 export const REASON_NOTE_MAX_LENGTH = 300;
+// Why the owner blocked a customer.
+export const BLOCK_REASON_MAX_LENGTH = 300;
+// Cash mismatches listed in one daily report; the report also gives the full count.
+export const MAX_REPORT_CASH_MISMATCHES = 100;
 // Prescription photos are viewed through signed URLs valid for at most this long.
 export const SIGNED_VIEW_URL_TTL_SECONDS = 600;
 // Push tokens per customer or admin account (one per device); the oldest is dropped beyond it.

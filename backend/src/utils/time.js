@@ -18,6 +18,14 @@ const MINUTE_MS = 60_000;
 // IST is a fixed UTC+05:30 with no DST, so an IST wall-clock time maps to one instant.
 export const istDayStart = (now) => new Date(`${istDateString(now)}T00:00:00.000+05:30`);
 
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
+// The instants bounding an IST calendar date (`YYYY-MM-DD`): `start` inclusive, `end` exclusive.
+export const istDayBounds = (date) => {
+  const start = new Date(`${date}T00:00:00.000+05:30`);
+  return { start, end: new Date(start.getTime() + DAY_MS) };
+};
+
 // Whole minutes since IST midnight (0–1439).
 export const istMinutesOfDay = (now) => Math.floor((now - istDayStart(now)) / MINUTE_MS);
 

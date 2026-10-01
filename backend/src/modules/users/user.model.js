@@ -19,6 +19,10 @@ const userSchema = new mongoose.Schema(
     consentAcceptedAt: { type: Date, default: null },
     consentVersion: { type: String, default: null },
     isBlocked: { type: Boolean, default: false },
+    // Set by the owner when blocking; all null while not blocked.
+    blockedAt: { type: Date, default: null },
+    blockedBy: { type: mongoose.Schema.Types.ObjectId, ref: "Admin", default: null },
+    blockReason: { type: String, default: null },
     pushTokens: { type: [pushTokenSchema], default: [] },
     // Bumped first inside every address-write transaction, so concurrent address writes for one
     // customer conflict and run one at a time (address cap, single default).
@@ -41,6 +45,8 @@ const userSchema = new mongoose.Schema(
         delete ret.uploadIssueSeq;
         delete ret.orderCreateSeq;
         delete ret.pushTokens;
+        delete ret.blockedBy;
+        delete ret.blockReason;
         return ret;
       },
     },
