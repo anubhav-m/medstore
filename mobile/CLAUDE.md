@@ -62,7 +62,7 @@ features/orders/
 - Safe areas via `react-native-safe-area-context`; status bar via `expo-status-bar`.
 - **Keyboard**: every screen with inputs uses `KeyboardAvoidingView` and/or a `ScrollView` with `keyboardShouldPersistTaps="handled"`. Forms stay usable with the keyboard open.
 - **Lists**: `FlatList` with `keyExtractor` and a memoized item component. Never `items.map()` inside a `ScrollView` for dynamic lists.
-- Touch targets ≥ 44px; interactive elements have `accessibilityLabel` / `accessibilityRole`.
+- Touch targets ≥ 48×48 dp with ≥ 8 dp between them (Material 3); interactive elements have `accessibilityLabel` / `accessibilityRole`.
 - Animations use `react-native-reanimated`.
 - Delete Expo template leftovers right after scaffolding (example directories, `reset-project` script, sample themed components, unused assets).
 

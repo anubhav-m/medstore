@@ -67,7 +67,7 @@ Verify exact versions with `npm view <pkg> version` — never rely on memory for
 - **Ask first** when: order, money, auth or prescription logic is ambiguous; adding a large dependency; changing a convention in any CLAUDE.md; any migration that deletes or rewrites data; any work that touches an **open decision** in section 6.
 - **Verify before saying "done".** Run the checks in section 5 and report real results, including failures.
 - Don't create README/docs/summary files unless asked. Never commit or push unless asked.
-- Never read, print, or edit `.env` files. Never run destructive DB commands except against a local test database.
+- `.env` files may be created and edited (e.g. to fill in values the user provides). They must stay git-ignored — check with `git check-ignore` before writing one in a new location — and are never committed. Never echo secret values back in chat, logs, command output or any committed file. Never run destructive DB commands except against a local test database.
 - When a convention changes, update the relevant CLAUDE.md in the same change.
 
 ---
