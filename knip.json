@@ -10,7 +10,7 @@
       "project": ["src/**/*.js", "scripts/**/*.js", "test/**/*.js"]
     },
     "mobile/core": {
-      "project": ["src/**/*.ts"]
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
     },
     "mobile/customer": {
       "entry": ["src/config/env.ts"],
@@ -18,7 +18,11 @@
       "ignoreDependencies": ["expo-updates"]
     },
     "mobile/admin": {
-      "entry": ["src/config/env.ts"],
+      "entry": [
+        "src/config/env.ts",
+        "src/features/orders/index.ts",
+        "src/features/reports/index.ts"
+      ],
       "project": ["src/**/*.{ts,tsx}"],
       "ignoreDependencies": ["expo-updates"]
     }

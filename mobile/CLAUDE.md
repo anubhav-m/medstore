@@ -9,8 +9,10 @@ mobile/
 ├── core/                     # @medstore/mobile-core — TypeScript source, no build step
 │   └── src/
 │       ├── ui/               # Button, Input, Text, Screen, Card, Loader, ErrorState, EmptyState,
-│       │                     # StatusBadge, ImageViewer, ConfirmDialog
-│       ├── theme/            # colors, spacing, typography, radii
+│       │                     # StatusBadge, ConfirmDialog, Banner, Amount, AmountRow, BillRow,
+│       │                     # Countdown, ReadOnlyField, … (DESIGN.md inventory);
+│       │                     # ImageViewer comes with the order-detail screens
+│       ├── theme/            # DESIGN.md tokens, DesignProvider (density per app), createStyles, fontAssets
 │       ├── api/              # parseApiUrl; createBaseQuery: auth header, single-flight refresh, error normalisation
 │       ├── auth/             # SecureStore token storage
 │       ├── errors/           # error-messages.ts (code → user text), getErrorMessage.ts
@@ -46,13 +48,15 @@ features/orders/
 
 - Code needed by **both** apps goes in `core`. Code needed by one app stays in that app. **Never copy code between apps** — move it to `core` instead.
 - Constants, types and the order transition table come from `@medstore/shared`. Never redefine statuses, error codes or limits.
-- `core` never imports from an app. It lists `react`, `react-native` and `expo-*` packages as **peerDependencies** — a second copy of React causes "Invalid hook call" errors. Check with `npm why react`.
+- `core` never imports from an app. It lists `react`, `react-native`, `expo-*` packages and other SDK-versioned packages (`@expo/vector-icons`, `react-native-reanimated`, `react-native-safe-area-context`) as **peerDependencies**, installed in each app with `npx expo install` — a second copy of React causes "Invalid hook call" errors. Check with `npm why react`. Plain asset packages (`@expo-google-fonts/anek-latin`) and `@medstore/shared` are regular dependencies of `core`.
+- Components never hold a raw colour, size or font name: styles come from `createStyles((tokens) => …)`, which builds one `StyleSheet` per app from the tokens in `core/src/theme`. Each app's root layout wraps everything in `DesignProvider` (`app="customer"` → comfortable density, `app="admin"` → compact) and loads `fontAssets` with `useFonts` behind the splash screen.
 - Expo's default Metro config handles npm workspaces. Don't add custom `watchFolders` or resolver config unless `expo-doctor` or a build error requires it.
 - Route files in `src/app` contain no logic: they import a screen and export it. Nothing except routes lives in `src/app`.
 - Import with the `@/` alias inside an app and by package name across packages — never deep relative paths (`../../../`).
 - Each app has its own `app.config.ts` with a distinct name, slug, scheme, icon and Android package. Names for now: **MedStore** and **MedStore Admin** (they will change). Packages (root D3): `com.medico.medstore` and `com.medico.medstore.admin`, also the iOS bundle identifiers. They can never change once published.
 - **Android first, iOS later.** Both apps keep the iOS platform enabled so it can be added without rework, but only Android is built and tested for now. Don't add Android-only config that would block iOS, and don't spend effort on iOS until asked.
 - `src/config/env.ts` is imported once in the root layout so a missing or malformed `EXPO_PUBLIC_API_URL` fails at startup. Until the API client imports it, `knip.json` lists it as an entry; remove that entry in the change that first imports `env`.
+- The admin rows built with the design system (`OrderRow` in `features/orders`, `CashMismatchRow` and `CashDifference` in `features/reports`) have no screen yet. Until the queue and daily-report screens import them, `knip.json` lists those two feature `index.ts` files as entries; remove each entry in the change that first imports it.
 
 ## 2. Components & UI
 

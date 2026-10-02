@@ -6,6 +6,8 @@ const config: ExpoConfig = {
   scheme: "medstore",
   version: "1.0.0",
   orientation: "portrait",
+  // Light only in v1 (DESIGN.md). Android needs expo-system-ui for this to apply.
+  userInterfaceStyle: "light",
   android: {
     package: "com.medico.medstore",
     predictiveBackGestureEnabled: false,

@@ -6,13 +6,23 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@expo-google-fonts/anek-latin": "^0.4.2",
+    "@medstore/shared": "*"
   },
   "peerDependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "expo-font": "~57.0.4",
     "react": "^19.2.0",
-    "react-native": "^0.86.0"
+    "react-native": "^0.86.0",
+    "react-native-reanimated": "^4.5.1",
+    "react-native-safe-area-context": "^5.7.0"
   },
   "devDependencies": {
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "5.0.3"
   }
 }
