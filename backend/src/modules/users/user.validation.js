@@ -1,5 +1,6 @@
 import {
   CUSTOMER_NAME_MAX_LENGTH,
+  CUSTOMER_PASSWORD_MAX_LENGTH,
   CUSTOMER_NAME_MIN_LENGTH,
   DOB_MIN,
   Gender,
@@ -48,4 +49,16 @@ export const onboardingSchema = {
     address: addressInput,
     consentAccepted: z.literal(true, { error: "Accept the terms and privacy policy to continue" }),
   }),
+};
+
+// Exactly one way to re-authenticate. The password is bounded only, like at login.
+export const deleteAccountSchema = {
+  body: z
+    .strictObject({
+      password: z.string().min(1).max(CUSTOMER_PASSWORD_MAX_LENGTH).optional(),
+      googleIdToken: z.string().min(1).max(4096).optional(),
+    })
+    .refine((body) => (body.password === undefined) !== (body.googleIdToken === undefined), {
+      message: "Confirm with your password or Google account",
+    }),
 };

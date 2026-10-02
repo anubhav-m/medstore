@@ -121,11 +121,13 @@ export interface AdminOrderStatusEntry {
   note: string | null;
 }
 
-/** Copied into the order when it was placed. */
+/** Copied into the order when it was placed, so it outlives the customer's account. */
 export interface AdminOrderCustomer {
   id: string;
   name: string;
   phone: string;
+  /** The customer has deleted their account */
+  isDeleted: boolean;
 }
 
 export interface AdminOrder {

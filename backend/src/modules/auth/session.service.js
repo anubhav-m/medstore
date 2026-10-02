@@ -1,9 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
-import { ErrorCodes } from "@medstore/shared";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { env } from "../../config/env.js";
-import { AppError } from "../../utils/AppError.js";
+import { invalidToken } from "../../utils/AppError.js";
 import { removeAllPushTokens, removePushToken } from "../notifications/pushToken.service.js";
 import { User } from "../users/user.model.js";
 import { toAuthUser } from "../users/user.service.js";
@@ -28,8 +27,6 @@ const SUBJECTS = {
 };
 
 const hashToken = (token) => createHash("sha256").update(token).digest("hex");
-
-export const invalidToken = () => new AppError("Invalid session", 401, ErrorCodes.INVALID_TOKEN);
 
 const createRefreshToken = async (subjectKind, subjectId) => {
   const token = randomBytes(32).toString("base64url");

@@ -16,6 +16,9 @@ export const rateLimits = {
   adminLogin: { windowMs: FIFTEEN_MINUTES, limit: 5 }, // per username
   adminLoginIp: { windowMs: FIFTEEN_MINUTES, limit: 20 }, // per IP
   refresh: { windowMs: FIFTEEN_MINUTES, limit: 30 },
+  // Password / Google re-authentication of a signed-in customer (DELETE /me), per customer, so a
+  // stolen access token can't be used to guess the password.
+  customerReauth: { windowMs: FIFTEEN_MINUTES, limit: 10 },
   // Order creations + reorders, per customer (root 3.8)
   orderCreate: { windowMs: ONE_HOUR, limit: 10 },
 };

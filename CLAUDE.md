@@ -152,8 +152,10 @@ Reports are **owner-only**. Admins are created and managed only with the backend
 - **Account deletion** is available in the customer app (Google Play requirement):
   - Requires re-authentication: the current password, or a fresh Google ID token for accounts without a password.
   - Refused with `409 ACCOUNT_HAS_OPEN_ORDERS` while any non-terminal order exists.
-  - Deletes profile, addresses, push tokens and sessions in one transaction.
-  - Past orders and their prescription images are **kept** (D1): orders keep their copied name, phone and address, and their images stay in the bucket.
+  - Accounts with a password must confirm it (a Google token is refused even when Google is linked); Google-only accounts send a Google ID token for the linked Google account.
+  - Deletes profile, addresses, push tokens, sessions and pending codes in one transaction. Blocked customers can delete their account too (the block record goes with it).
+  - Past orders and their prescription images are **kept** (D1): orders keep their copied name, phone and address, and their images stay in the bucket. Staff still see those orders, with the customer marked as deleted.
+  - The email (and Google account) is free to sign up again as a new account, which doesn't see the old orders.
   - Google Play also needs a web link: a static page (not served by this backend) explaining in-app deletion and giving a support email for requests (**open decision D2**).
 
 ### 3.3 Stores
@@ -299,6 +301,7 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 | Order creations + reorders per customer | 10 per hour |
 | Push tokens per customer or admin account | 10 (the oldest is dropped) |
 | Code resend | 60 s cooldown, 5 per email per hour; 5 attempts per code; 10-minute expiry |
+| Re-authentication (account deletion) | 10 per 15 min per customer |
 | Login attempts | customer: 10 per 15 min per IP+email; admin: 5 failed per 15 min per username, plus 20 failed per 15 min per IP (shared with admin change-password) |
 | Email | ≤ 254 chars, trimmed and lowercased |
 | Customer password / admin password | 8–128 / 12–128 chars (admins see every customer's health data) |

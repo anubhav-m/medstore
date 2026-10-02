@@ -35,7 +35,7 @@ backend/
     ├── services/             # integrations only: storage.js, email.js, push.js, googleAuth.js
     ├── jobs/                 # expireUnconfirmedBills.js, deleteUnusedUploads.js
     ├── routes/               # customer.routes.js (/api/v1), admin.routes.js (/api/v1/admin)
-    └── utils/                # AppError, sendSuccess, pagination, time (IST), money, escapeRegex,
+    └── utils/                # AppError (+ invalidToken), sendSuccess, pagination, time (IST), money, escapeRegex,
                               # geo (lat/lng ↔ GeoJSON), idParams (+ objectId), phone (Indian phone schema)
 test/                         # mirrors src/; globalSetup.js (memory replica set), setup.js
 ```
@@ -213,7 +213,11 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
   - `login` on an unverified account sends a code only if the limits allow (silently skipped otherwise) and always answers `EMAIL_NOT_VERIFIED`.
 - `authCustomer` sets `req.user = { id, onboardingCompleted }` from its one read. `requireOnboarded` (after it) guards every customer route except auth, profile and onboarding.
 - Every customer query includes `userId: req.user.id`.
-- Account deletion requires re-authentication with `{ password }` or `{ googleIdToken }` (root 3.2).
+- Account deletion (`DELETE /me`, `users/accountDeletion.service.js`) requires re-authentication (root 3.2), so a stolen access token alone can't delete an account:
+  - An account with a password must send `{ password }` — `{ googleIdToken }` is `INVALID_CREDENTIALS` even when Google is linked. An account without one sends `{ googleIdToken }`, verified like Google sign-in; its `sub` must equal the account's `googleId`. A wrong password (or a password for a Google-only account, checked against the dummy hash) → `INVALID_CREDENTIALS`. The `customerReauth` limiter applies.
+  - One transaction: delete the user document **first**, then check for open orders (`ACCOUNT_HAS_OPEN_ORDERS` aborts it, so nothing is deleted), then delete addresses, refresh tokens and OTP codes. Push tokens live on the user document.
+  - Kept: orders and their photos (root D1), `uploads` records (unattached ones go with the cleanup job), and `codeSends`, so the per-email send limits still apply when the freed email registers again.
+  - Order creation, upload-URL issue and address writes all write the user document first in their transactions, so they conflict with a deletion; each checks that the document still exists (`matchedCount` / `null`) and otherwise throws `INVALID_TOKEN`, so nothing is ever written for a deleted account.
 
 ### Admins
 
@@ -236,7 +240,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ### Rate limits
 
-Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `adminLogin` (per username, failed only), `adminLoginIp` (per IP, failed only; admin login and change-password) and `orderCreate` (10 per hour per customer, keyed by `customerKey` after `authCustomer`; one limiter instance shared by `POST /orders` and reorder). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. The per-email code-send and per-customer upload-URL limits are **domain limits** (numbers in `@medstore/shared`), counted from the database in `otp.service.js` and `upload.service.js`, not `express-rate-limit` — the upload day is the IST calendar day, which a rolling window can't express. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
+Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `customerReauth` (10 per 15 min per customer, keyed by `customerKey`; `DELETE /me`), `adminLogin` (per username, failed only), `adminLoginIp` (per IP, failed only; admin login and change-password) and `orderCreate` (10 per hour per customer, keyed by `customerKey` after `authCustomer`; one limiter instance shared by `POST /orders` and reorder). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. The per-email code-send and per-customer upload-URL limits are **domain limits** (numbers in `@medstore/shared`), counted from the database in `otp.service.js` and `upload.service.js`, not `express-rate-limit` — the upload day is the IST calendar day, which a rolling window can't express. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
 
 ## 7. API surface
 
@@ -258,7 +262,7 @@ Customer — `/api/v1`:
 | `GET /me` | `{ user: CustomerProfile }`: auth fields + `isBlocked`, `hasPassword`, `name`, `phone`, `dob`, `gender`, `consentAcceptedAt`, `consentVersion` (auth endpoints still return `AuthUser`) | — |
 | `PATCH /me` | `{ name?, phone?, dob?, gender? }`, at least one; `null` clears `dob` / `gender` | — |
 | `POST /me/password` | `{ currentPassword, newPassword }` → fresh tokens | `INVALID_CREDENTIALS` (also when the account has no password) |
-| `DELETE /me` | `{ password }` or `{ googleIdToken }` | `INVALID_CREDENTIALS`, `ACCOUNT_HAS_OPEN_ORDERS` |
+| `DELETE /me` | exactly one of `{ password }` / `{ googleIdToken }` (§6); no data in the response. Not †: works before onboarding | `INVALID_CREDENTIALS`, `ACCOUNT_HAS_OPEN_ORDERS` |
 | `POST /me/onboarding` | `{ name, phone, address, consentAccepted: true }` → `{ user, address }` | `ONBOARDING_ALREADY_COMPLETED` |
 | `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body (never in the URL), an Expo push token (≤ 200 chars, SDK check); no data in the response. POST makes it the account's newest (≤ 10 kept) and removes it from every other customer and admin; DELETE removes it from the caller only. Not †: works before onboarding and for blocked customers | — |
 | `GET /addresses` † | all (≤ 10), default first then newest; not paginated | — |
@@ -288,7 +292,7 @@ Admin — `/api/v1/admin`:
 | `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body; same rules as the customer endpoints (`authAdmin`, so not while `mustChangePassword`) | — |
 | `GET /orders?storeId=&tab=&q=&page=&limit=` | `{ orders: AdminOrderSummary[] }` + `meta`; `tab` from `ADMIN_ORDER_TABS`, sorted as its table says (no `tab`: every status, newest first); `q` (1–50 chars) = order-number prefix or phone (see below); no image URLs | `STORE_NOT_FOUND` |
 | `GET /orders/counts?storeId=` | `{ counts: Record<AdminOrderTab, number> }` from one aggregation | `STORE_NOT_FOUND` |
-| `GET /orders/:id` | `{ order: AdminOrderDetail }`: signed `imageUrls` (600 s), the copied customer `{ id, name, phone }`, history with admin names | `ORDER_NOT_FOUND`, `SERVICE_UNAVAILABLE` (signing failed) |
+| `GET /orders/:id` | `{ order: AdminOrderDetail }`: signed `imageUrls` (600 s), the copied customer `{ id, name, phone, isDeleted }` (`isDeleted`: the account was deleted; every `AdminOrder` has it), history with admin names | `ORDER_NOT_FOUND`, `SERVICE_UNAVAILABLE` (signing failed) |
 | `POST /orders/:id/reject` | `{ reasonCode, note? }` (`RejectReason`; `note` required for `OTHER`) → `{ order: AdminOrder }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
 | `POST /orders/:id/bill` | `{ expectedBillVersion, items[{ name, quantity, unitPricePaise }], deliveryFeePaise?, discountPaise? }`; creates (version 0 → 1) or revises (version + 1); fee defaults to the order's current one, discount to 0; client totals are a 400 | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED`, `BILL_CHANGED` |
 | `POST /orders/:id/pack` · `/dispatch` | | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |

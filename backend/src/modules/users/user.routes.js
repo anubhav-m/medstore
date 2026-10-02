@@ -1,31 +1,45 @@
 import { Router } from "express";
 import { authCustomer } from "../../middleware/authCustomer.js";
+import { createRateLimit, customerKey } from "../../middleware/rateLimit.js";
 import { validate } from "../../middleware/validate.js";
 import { pushTokenRequestSchema } from "../notifications/pushToken.validation.js";
 import * as controller from "./user.controller.js";
 import * as schemas from "./user.validation.js";
 
-// Profile, onboarding and push tokens stay reachable before onboarding (no requireOnboarded).
-export const userRoutes = Router();
+// Profile, onboarding, account deletion and push tokens stay reachable before onboarding (no
+// requireOnboarded). Built per app so every app instance (and every test) gets its own limiter.
+export const createUserRoutes = (rateLimits) => {
+  const router = Router();
+  const reauth = createRateLimit(rateLimits.customerReauth, { keyGenerator: customerKey });
 
-userRoutes.get("/me", authCustomer, controller.getMe);
-userRoutes.patch("/me", authCustomer, validate(schemas.updateMeSchema), controller.updateMe);
-userRoutes.post(
-  "/me/onboarding",
-  authCustomer,
-  validate(schemas.onboardingSchema),
-  controller.completeOnboarding,
-);
-// The token goes in the body, never the URL.
-userRoutes.post(
-  "/me/push-tokens",
-  authCustomer,
-  validate(pushTokenRequestSchema),
-  controller.registerPushToken,
-);
-userRoutes.delete(
-  "/me/push-tokens",
-  authCustomer,
-  validate(pushTokenRequestSchema),
-  controller.removePushToken,
-);
+  router.get("/me", authCustomer, controller.getMe);
+  router.patch("/me", authCustomer, validate(schemas.updateMeSchema), controller.updateMe);
+  // The body is sent by our own app only (backend CLAUDE.md §7).
+  router.delete(
+    "/me",
+    authCustomer,
+    reauth,
+    validate(schemas.deleteAccountSchema),
+    controller.deleteAccount,
+  );
+  router.post(
+    "/me/onboarding",
+    authCustomer,
+    validate(schemas.onboardingSchema),
+    controller.completeOnboarding,
+  );
+  // The token goes in the body, never the URL.
+  router.post(
+    "/me/push-tokens",
+    authCustomer,
+    validate(pushTokenRequestSchema),
+    controller.registerPushToken,
+  );
+  router.delete(
+    "/me/push-tokens",
+    authCustomer,
+    validate(pushTokenRequestSchema),
+    controller.removePushToken,
+  );
+  return router;
+};

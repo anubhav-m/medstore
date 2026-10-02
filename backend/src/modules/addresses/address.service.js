@@ -1,6 +1,6 @@
 import { ErrorCodes, MAX_ADDRESSES } from "@medstore/shared";
 import mongoose from "mongoose";
-import { AppError } from "../../utils/AppError.js";
+import { AppError, invalidToken } from "../../utils/AppError.js";
 import { fromPoint, toPoint } from "../../utils/geo.js";
 import { User } from "../users/user.model.js";
 import { Address } from "./address.model.js";
@@ -30,9 +30,15 @@ const toAddressFields = ({ lat, lng, ...fields }) => ({
 
 // Bumping the user document first makes concurrent address writes of one customer conflict, so
 // the transaction driver retries them one at a time and the cap and single default stay exact.
+// It also conflicts with account deletion, so no address is written for a deleted account.
 const withAddressLock = (userId, fn) =>
   mongoose.connection.transaction(async (session) => {
-    await User.updateOne({ _id: userId }, { $inc: { addressWriteSeq: 1 } }, { session });
+    const locked = await User.updateOne(
+      { _id: userId },
+      { $inc: { addressWriteSeq: 1 } },
+      { session },
+    );
+    if (locked.matchedCount === 0) throw invalidToken();
     return fn(session);
   });
 

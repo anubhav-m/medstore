@@ -6,7 +6,7 @@ import {
   OrderStatus,
 } from "@medstore/shared";
 import mongoose from "mongoose";
-import { AppError } from "../../utils/AppError.js";
+import { AppError, invalidToken } from "../../utils/AppError.js";
 import { Address } from "../addresses/address.model.js";
 import { addressNotFound } from "../addresses/address.service.js";
 import { findStoreForPin, deliversTo, toDistanceKm } from "../stores/store.service.js";
@@ -26,8 +26,10 @@ const findByIdempotencyKey = (userId, idempotencyKey, session) =>
   Order.findOne({ userId, idempotencyKey }, null, { session }).lean();
 
 // Check 1 (onboarding is enforced by requireOnboarded). Returns the contact details to copy.
+// The account may have been deleted since the request was authenticated.
 const loadOrderingCustomer = async (userId) => {
   const user = await User.findById(userId, { isBlocked: 1, name: 1, phone: 1 }).lean();
+  if (!user) throw invalidToken();
   if (user.isBlocked) {
     throw new AppError(
       "Your account can't place orders right now",
@@ -80,7 +82,13 @@ const copyAddress = ({ label, line1, line2, landmark, city, pincode, location })
 const insertOrder = async ({ userId, idempotencyKey, imagePaths, now, ...fields }) => {
   const orderNumber = await nextOrderNumber(fields.store.code);
   const { order, created } = await mongoose.connection.transaction(async (session) => {
-    await User.updateOne({ _id: userId }, { $inc: { orderCreateSeq: 1 } }, { session });
+    const locked = await User.updateOne(
+      { _id: userId },
+      { $inc: { orderCreateSeq: 1 } },
+      { session },
+    );
+    // Deleted meanwhile: an order must never outlive the check that the account had none open.
+    if (locked.matchedCount === 0) throw invalidToken();
     const existing = await findByIdempotencyKey(userId, idempotencyKey, session);
     if (existing) return { order: existing, created: false };
 

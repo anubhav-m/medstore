@@ -58,3 +58,9 @@ export interface OnboardingResponse {
   user: CustomerProfile;
   address: Address;
 }
+
+/**
+ * DELETE /me re-authenticates: accounts with a password send it (`hasPassword`); Google-only
+ * accounts send a fresh Google ID token. The response has no `data`.
+ */
+export type DeleteAccountRequest = { password: string } | { googleIdToken: string };

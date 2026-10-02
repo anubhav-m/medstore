@@ -1,6 +1,6 @@
 import { CONSENT_VERSION, ErrorCodes } from "@medstore/shared";
 import mongoose from "mongoose";
-import { AppError } from "../../utils/AppError.js";
+import { AppError, invalidToken } from "../../utils/AppError.js";
 import { insertAddress } from "../addresses/address.service.js";
 import { User } from "./user.model.js";
 
@@ -24,11 +24,9 @@ const toProfile = (user) => ({
   consentVersion: user.consentVersion ?? null,
 });
 
-const invalidSession = () => new AppError("Invalid session", 401, ErrorCodes.INVALID_TOKEN);
-
 export const getMe = async (userId) => {
   const user = await User.findById(userId).select("+passwordHash").lean();
-  if (!user) throw invalidSession();
+  if (!user) throw invalidToken();
   return toProfile(user);
 };
 
@@ -44,7 +42,7 @@ export const updateMe = async (userId, { name, phone, dob, gender }) => {
   )
     .select("+passwordHash")
     .lean();
-  if (!user) throw invalidSession();
+  if (!user) throw invalidToken();
   return toProfile(user);
 };
 

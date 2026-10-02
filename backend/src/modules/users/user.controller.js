@@ -1,6 +1,7 @@
 import { sendSuccess } from "../../utils/sendSuccess.js";
 import { SubjectKind } from "../auth/refreshToken.model.js";
 import * as pushTokenService from "../notifications/pushToken.service.js";
+import * as accountDeletionService from "./accountDeletion.service.js";
 import * as userService from "./user.service.js";
 
 export const getMe = async (req, res, next) => {
@@ -25,6 +26,15 @@ export const completeOnboarding = async (req, res, next) => {
   try {
     const result = await userService.completeOnboarding(req.user.id, req.validated.body);
     return sendSuccess(res, { message: "Welcome aboard", data: result });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+export const deleteAccount = async (req, res, next) => {
+  try {
+    await accountDeletionService.deleteAccount(req.user.id, req.validated.body);
+    return sendSuccess(res, { message: "Account deleted" });
   } catch (error) {
     return next(error);
   }

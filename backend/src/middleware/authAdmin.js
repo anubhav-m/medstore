@@ -1,9 +1,9 @@
 import { ErrorCodes } from "@medstore/shared";
 import { SubjectKind } from "../modules/auth/refreshToken.model.js";
-import { invalidToken, verifyAccessToken } from "../modules/auth/session.service.js";
+import { verifyAccessToken } from "../modules/auth/session.service.js";
 import { Admin } from "../modules/admins/admin.model.js";
 import { accountDisabled } from "../modules/admins/admin.service.js";
-import { AppError } from "../utils/AppError.js";
+import { AppError, invalidToken } from "../utils/AppError.js";
 
 // The admin is loaded on every request (there are only a few), so disabling an account,
 // requiring a password change or changing the role or stores applies immediately, whatever the

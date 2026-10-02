@@ -1,6 +1,7 @@
 import { HistoryActorKind } from "@medstore/shared";
 import { Admin } from "../admins/admin.model.js";
 import { Store } from "../stores/store.model.js";
+import { User } from "../users/user.model.js";
 import { toBill, toCancellation, toDeliveryAddress, toReason } from "./order.view.js";
 
 // Admin responses pick their fields explicitly: never idempotencyKey, image paths or item name
@@ -35,12 +36,17 @@ const toAdminOrderSummary = (order, store) => ({
   createdAt: order.createdAt,
 });
 
-const toAdminOrder = (order, store, adminNames) => ({
+const toAdminOrder = (order, store, adminNames, customerExists) => ({
   id: String(order._id),
   orderNumber: order.orderNumber,
   status: order.status,
   store: toStoreSummary(store),
-  customer: { id: String(order.userId), name: order.customerName, phone: order.customerPhone },
+  customer: {
+    id: String(order.userId),
+    name: order.customerName,
+    phone: order.customerPhone,
+    isDeleted: !customerExists,
+  },
   patientName: order.patientName,
   customerNote: order.customerNote ?? null,
   deliveryAddress: toDeliveryAddress(order.deliveryAddress),
@@ -68,13 +74,15 @@ const loadAdminNames = async (statusHistory) => {
   return new Map(admins.map((admin) => [String(admin._id), admin.name]));
 };
 
-// Stores are never deleted, so every order's store exists.
+// Stores are never deleted, so every order's store exists. Customers can delete their account;
+// their orders keep the copied contact details (root D1).
 export const presentAdminOrder = async (order) => {
-  const [store, adminNames] = await Promise.all([
+  const [store, adminNames, customerExists] = await Promise.all([
     Store.findById(order.storeId, STORE_FIELDS).lean(),
     loadAdminNames(order.statusHistory),
+    User.exists({ _id: order.userId }),
   ]);
-  return toAdminOrder(order, store, adminNames);
+  return toAdminOrder(order, store, adminNames, Boolean(customerExists));
 };
 
 // One store query for the whole page.

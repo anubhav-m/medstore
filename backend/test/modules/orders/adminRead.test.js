@@ -253,7 +253,12 @@ describe("GET /admin/orders/:id", () => {
       orderNumber: order.orderNumber,
       status: S.AWAITING_CONFIRMATION,
       store: { id: store.id, code: "ST01", name: store.name },
-      customer: { id: customer.user.id, name: "Asha Rao", phone: "+919876543210" },
+      customer: {
+        id: customer.user.id,
+        name: "Asha Rao",
+        phone: "+919876543210",
+        isDeleted: false,
+      },
       patientName: "Ravi Rao",
       customerNote: "Old note",
       deliveryAddress: { ...ADDRESS },

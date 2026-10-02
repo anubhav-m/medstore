@@ -1,6 +1,7 @@
 import { SubjectKind } from "../modules/auth/refreshToken.model.js";
-import { invalidToken, verifyAccessToken } from "../modules/auth/session.service.js";
+import { verifyAccessToken } from "../modules/auth/session.service.js";
 import { User } from "../modules/users/user.model.js";
+import { invalidToken } from "../utils/AppError.js";
 
 export const authCustomer = async (req, _res, next) => {
   try {

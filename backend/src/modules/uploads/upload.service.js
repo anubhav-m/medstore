@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ErrorCodes, UPLOAD_URLS_PER_HOUR, UPLOAD_URLS_PER_IST_DAY } from "@medstore/shared";
 import mongoose from "mongoose";
 import { createSignedUploadUrl } from "../../services/storage.js";
-import { AppError } from "../../utils/AppError.js";
+import { AppError, invalidToken } from "../../utils/AppError.js";
 import { istDayStart } from "../../utils/time.js";
 import { User } from "../users/user.model.js";
 import { Upload } from "./upload.model.js";
@@ -35,6 +35,8 @@ const recordUpload = (userId, { contentType, sizeBytes }) =>
       { $inc: { uploadIssueSeq: 1 } },
       { session, projection: { isBlocked: 1 } },
     ).lean();
+    // Deleted since the request was authenticated.
+    if (!user) throw invalidToken();
     if (user.isBlocked) {
       throw new AppError(
         "Your account can't place orders right now",
