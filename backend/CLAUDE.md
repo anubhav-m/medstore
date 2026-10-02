@@ -352,7 +352,7 @@ counters       _id (store code), seq — never reset
   - `admins`: `username` unique; `pushTokens.token`
   - `stores`: `code` unique; `location` 2dsphere
   - `addresses`: `{ userId, createdAt: -1 }`; `userId` unique with `partialFilterExpression: { isDefault: true }` (at most one default, enforced by the database)
-  - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks). The expiry and report indexes are added by the features that first query them.
+  - `orders`: `orderNumber` unique; `{ storeId, status, createdAt }`; `{ userId, status, createdAt }`; `{ userId, idempotencyKey }` unique; `{ status, billExpiresAt }` (expiry job); `{ storeId, "items.nameKey" }` (suggestions); `{ storeId, customerPhone }` (search); `{ storeId, deliveredAt }` (report); `images.path` (reference checks).
   - `uploads`: `path` unique; `{ userId, createdAt }`; `{ attachedAt, createdAt }` (cleanup job — added with it)
   - `refreshTokens`: `tokenHash` unique; `{ subjectKind, subjectId }`; TTL on `expiresAt`
   - `otpCodes`: `{ userId, purpose }` unique; TTL on `expiresAt`
@@ -416,7 +416,11 @@ counters       _id (store code), seq — never reset
 
 Each job is an exported function taking `now`, so tests call it directly. `server.js` schedules them with `setInterval` and clears them on shutdown. With one always-on instance (§15) that is enough; every job is safe to run twice.
 
-- `jobs/expireUnconfirmedBills.js` — every 5 minutes: cancels `AWAITING_CONFIRMATION` orders with `billExpiresAt <= now` using the same conditional transition as everything else (`by.kind: SYSTEM`, reason `BILL_EXPIRED`); `transitionOrder` sends the root 3.6 notifications itself.
+- `jobs/expireUnconfirmedBills.js` — every 5 minutes (`startBillExpiryJob()`, which returns its stop function): cancels `AWAITING_CONFIRMATION` orders with `billExpiresAt <= now` using the same conditional transition as everything else (`EXPIRE_BILL`, `by.kind: SYSTEM`, cancellation `{ byKind: SYSTEM, code: BILL_EXPIRED }` — `SystemCancelReason` in `shared` — and the history note "Bill not confirmed in time"); `transitionOrder` sends the root 3.6 notifications itself.
+  - Selection is by `billExpiresAt` (which already holds the timeout and the closing-time cap), never recomputed from `billSentAt`. At most 100 orders per run, earliest expiry first (`{ status, billExpiresAt }` index); the rest wait for the next tick.
+  - Each update also matches the `billVersion` the job read, so a bill revised after the query (new expiry) is never cancelled.
+  - An order confirmed, cancelled or revised meanwhile (`INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED`, `BILL_CHANGED`) is counted as skipped, not an error. Any other failure is logged with the order id only, and the batch continues. `expireUnconfirmedBills(now)` returns `{ expired, skipped, failed }`.
+  - `runScheduledBillExpiry` skips a tick (returns `null`) while the previous run is still going. Overlapping runs (e.g. two instances) are still safe: each order is cancelled once.
 - Push receipts — checks Expo push receipts and deletes tokens they report as `DeviceNotRegistered` (§9). Needs the ticket ids stored when sending; designed in the jobs session.
 - `jobs/deleteUnusedUploads.js` — hourly: for uploads with no `attachedAt` created more than 24 hours ago, deletes the storage object, then the record.
 - There is no retention job: orders and images attached to orders are kept (root D1).

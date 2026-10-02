@@ -111,6 +111,8 @@ orderSchema.index({ storeId: 1, status: 1, createdAt: -1 });
 orderSchema.index({ storeId: 1, customerPhone: 1 });
 // Item-name suggestions.
 orderSchema.index({ storeId: 1, "items.nameKey": 1 });
+// Bill-expiry job: bills awaiting confirmation whose expiry has passed.
+orderSchema.index({ status: 1, billExpiresAt: 1 });
 // Daily report: orders delivered on a day.
 orderSchema.index({ storeId: 1, deliveredAt: 1 });
 // Whether any order still references an image.

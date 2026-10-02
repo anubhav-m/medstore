@@ -197,7 +197,7 @@ On success: status `PENDING_REVIEW`, an order number is assigned, the address is
 | `AWAITING_CONFIRMATION` | `AWAITING_CONFIRMATION` | staff | revised bill (`billVersion` + 1, expiry restarts, customer notified again) |
 | `AWAITING_CONFIRMATION` | `CONFIRMED` | customer | the `billVersion` they were shown, before `billExpiresAt` |
 | `PENDING_REVIEW`, `AWAITING_CONFIRMATION` | `CANCELLED` | customer | optional cancel reason code (+ note) |
-| `AWAITING_CONFIRMATION` | `CANCELLED` | system | `billExpiresAt` has passed (reason `BILL_EXPIRED`) |
+| `AWAITING_CONFIRMATION` | `CANCELLED` | system | `billExpiresAt` has passed (reason `BILL_EXPIRED`, note "Bill not confirmed in time"; the bill-expiry job, every 5 minutes) |
 | `AWAITING_CONFIRMATION`, `CONFIRMED`, `PACKED` | `CANCELLED` | staff | staff cancel reason code (+ note) |
 | `CONFIRMED` | `PACKED` | staff | — |
 | `PACKED` | `OUT_FOR_DELIVERY` | staff | — |

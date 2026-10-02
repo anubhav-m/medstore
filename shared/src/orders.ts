@@ -54,6 +54,13 @@ export const DeliveryFailedReason = {
 
 export type DeliveryFailedReason = (typeof DeliveryFailedReason)[keyof typeof DeliveryFailedReason];
 
+/** Set by the bill-expiry job when a bill isn't confirmed before `billExpiresAt`. */
+export const SystemCancelReason = {
+  BILL_EXPIRED: "BILL_EXPIRED",
+} as const;
+
+export type SystemCancelReason = (typeof SystemCancelReason)[keyof typeof SystemCancelReason];
+
 /** Cash on delivery is the only payment method. */
 export const PAYMENT_METHOD_COD = "COD";
 

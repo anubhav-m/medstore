@@ -3,6 +3,7 @@ import { createApp } from "./app.js";
 import { connectDb, disconnectDb } from "./config/db.js";
 import { env } from "./config/env.js";
 import { logger } from "./config/logger.js";
+import { startBillExpiryJob } from "./jobs/expireUnconfirmedBills.js";
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -22,6 +23,8 @@ const server = createApp().listen(env.PORT);
 await once(server, "listening");
 logger.info({ port: env.PORT }, "server listening");
 
+const stopBillExpiryJob = startBillExpiryJob();
+
 let shuttingDown = false;
 
 const shutdown = async (signal) => {
@@ -35,6 +38,7 @@ const shutdown = async (signal) => {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
+  stopBillExpiryJob();
   server.close();
   server.closeIdleConnections();
   await once(server, "close");
