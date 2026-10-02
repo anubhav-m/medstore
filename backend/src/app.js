@@ -21,11 +21,12 @@ export const createApp = ({ rateLimits: overrides } = {}) => {
   app.use(requestId);
   app.use(helmet());
   app.use(requestLogger);
+  // Before the limiter: the host's health checks share one IP and must never be refused.
+  app.use(healthRoutes);
   // Before body parsing, so malformed or oversized bodies still count toward the limit.
   app.use(createRateLimit(rateLimits.global));
   app.use(express.json({ limit: "100kb" }));
 
-  app.use(healthRoutes);
   app.use("/api/v1/admin", createAdminRoutes(rateLimits));
   app.use("/api/v1", createCustomerRoutes(rateLimits));
 

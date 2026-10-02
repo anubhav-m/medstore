@@ -4,6 +4,7 @@ import {
   BILL_ITEM_NAME_MAX_LENGTH,
   BILL_ITEM_NAME_MIN_LENGTH,
   BILL_UNIT_PRICE_MAX_PAISE,
+  CASH_COLLECTED_MAX_PAISE,
   DELIVERY_FEE_MAX_PAISE,
   DeliveryFailedReason,
   MAX_BILL_ITEMS,
@@ -95,5 +96,5 @@ export const sendBillSchema = {
 
 export const deliverSchema = {
   params: idParamsSchema,
-  body: z.strictObject({ cashCollectedPaise: wholeNumber(0) }),
+  body: z.strictObject({ cashCollectedPaise: bounded(0, CASH_COLLECTED_MAX_PAISE) }),
 };

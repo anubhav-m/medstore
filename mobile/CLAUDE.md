@@ -72,7 +72,7 @@ features/orders/
 - **Client state → slices** (`createSlice`): auth session, selected store and address, UI flags. Keep the store serializable.
 - Typed hooks `useAppDispatch` / `useAppSelector`. Derived data from selectors (`createSelector`) or `useMemo` — **never** `useEffect` + `setState`.
 - No prop drilling past two levels. No arrays of separate `useState`s for collections.
-- `createBaseQuery` handles the auth header, `401` with code **`TOKEN_EXPIRED`** → single-flight refresh → retry, and logout when refresh fails. Any other 401 (e.g. `INVALID_CREDENTIALS` for a wrong current password) is a normal error shown to the user — it never triggers a refresh or logout.
+- `createBaseQuery` handles the auth header, `401` with code **`TOKEN_EXPIRED`** → single-flight refresh → retry, and logout when refresh fails. Single-flight means one refresh at a time across the whole app (app start, background tasks and every query): the backend treats a refresh token presented twice as stolen and signs the account out on every device. Any other 401 (e.g. `INVALID_CREDENTIALS` for a wrong current password) is a normal error shown to the user — it never triggers a refresh or logout.
 - Logout sends the refresh token and this device's push token in the body, then clears SecureStore.
 - React Native has no window focus events: call `setupListeners` with an `AppState`-based handler so refetch-on-focus and reconnect work.
 

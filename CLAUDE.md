@@ -133,7 +133,7 @@ These apply everywhere. The backend **enforces** them; the apps only reflect the
 Reports are **owner-only**. Admins are created and managed only with the backend CLI scripts (create, reset password, disable, enable, set stores, list) — never by self sign-up and never by inserting documents by hand. Owner-side admin management inside the app is a later phase.
 
 ### 3.2 Customer accounts
-- **Email sign-up**: register creates an unverified account and emails a 6-digit code; no tokens are issued until `verify-email` succeeds. Registering an email whose account is still unverified replaces that pending account's password and sends a new code (same response as a fresh sign-up). An email with a verified account → `EMAIL_ALREADY_REGISTERED`.
+- **Email sign-up**: register creates an unverified account and emails a 6-digit code; no tokens are issued until `verify-email` succeeds. Registering an email whose account is still unverified replaces that pending account's password and sends a new code (same response as a fresh sign-up). An email with a verified account → `EMAIL_ALREADY_REGISTERED`. An account still unverified 7 days after its last sign-up is deleted by a job, unless a code sent to it is still live (it never had tokens, so nothing else is lost).
 - **Login** with the correct password on an unverified account → `EMAIL_NOT_VERIFIED`, and a new code is sent (subject to the resend limits).
 - **Google**: match by `googleId`, then by email. A match by email links the accounts, never duplicates. **If the matched account's email was unverified, its password is deleted and the email marked verified** — otherwise someone who pre-registered the victim's email could still sign in with their password.
 - **Codes** (email verification and password reset): 6 digits, stored hashed, expire in 10 minutes, at most 5 attempts per code. A new code invalidates the previous one. Resend cooldown 60 seconds, max 5 codes per email per hour. Forgot-password and resend responses never reveal whether the email exists.
@@ -252,7 +252,7 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 - **Money is integer paise.** Never floats — not in the DB, API, or app math.
 - Order numbers are `{storeCode}-{6-digit sequence}` (e.g. `ST01-000042`) from an atomic `$inc` on one counter per store that **never resets**. Gaps are acceptable.
 - Store hours gate **new** orders and reorders only. Orders already placed continue after closing.
-- `DELIVERED` sets `paymentStatus: COLLECTED`, `deliveredAt`, and records `cashCollectedPaise` (integer ≥ 0, may differ from the total — it is recorded as given).
+- `DELIVERED` sets `paymentStatus: COLLECTED`, `deliveredAt`, and records `cashCollectedPaise` (integer from 0 to `CASH_COLLECTED_MAX_PAISE`, the largest total any bill can reach; it may differ from the total — it is recorded as given).
 - **Daily report** (owner-only, any store including inactive ones), per store for one IST date (IST midnight to midnight; not in the future): counts of orders created that day by their current status; and for orders whose `deliveredAt` falls on that day, the delivered count, expected cash (sum of `totalPaise`) vs collected cash (sum of `cashCollectedPaise`) and the difference (collected − expected), plus the orders where collected ≠ expected (order number and both amounts; oldest delivery first, at most `MAX_REPORT_CASH_MISMATCHES` = 100 listed, all counted).
 
 ### 3.5 Prescription images & privacy
@@ -301,8 +301,9 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 | Order creations + reorders per customer | 10 per hour |
 | Push tokens per customer or admin account | 10 (the oldest is dropped) |
 | Code resend | 60 s cooldown, 5 per email per hour; 5 attempts per code; 10-minute expiry |
-| Re-authentication (account deletion) | 10 per 15 min per customer |
-| Login attempts | customer: 10 per 15 min per IP+email; admin: 5 failed per 15 min per username, plus 20 failed per 15 min per IP (shared with admin change-password) |
+| Re-authentication (password change and account deletion, one shared count) | 10 per 15 min per customer |
+| Logout | 30 per 15 min per IP (customers and admins) |
+| Login attempts | customer: 10 per 15 min per IP+email, plus 30 failed per 15 min per IP; admin: 5 failed per 15 min per username, plus 20 failed per 15 min per IP (shared with admin change-password) |
 | Email | ≤ 254 chars, trimmed and lowercased |
 | Customer password / admin password | 8–128 / 12–128 chars (admins see every customer's health data) |
 | Admin username | 3–30 chars, lowercase letters, digits, `.` `_` |
@@ -313,6 +314,7 @@ Oldest and newest are by `createdAt`. Without a tab, the admin list shows every 
 | Address pin | inside India: lat 6.4–37.6, lng 68.1–97.5 (`INDIA_BOUNDS`) |
 | Date of birth | 1900-01-01 to yesterday (IST) |
 | Bill | 1–50 items; name 2–100 chars; quantity 1–999; unit price 1–10,000,000 paise; delivery fee 0–100,000 paise |
+| Cash collected on delivery | 0 – `CASH_COLLECTED_MAX_PAISE` (50 × 999 × 10,000,000 + 100,000 = 499,500,100,000 paise, the largest possible bill total) |
 | Delivery radius | 0.5–50 km, one decimal |
 | Store | code 2–6 of `A–Z 0–9`; name 2–80 chars; phone Indian 10 digits starting 1–9; hours 0–1440 minutes, opening < closing, not 0–1440; delivery fee 0–100,000 paise; address limits as for customer addresses |
 | Search / suggestion query | 1–50 chars; suggestions max 10 |

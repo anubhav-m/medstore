@@ -42,20 +42,19 @@ export const register = async ({ email, password }) => {
   }
 };
 
+const invalidCode = () =>
+  new AppError("The code is invalid or has expired", 400, ErrorCodes.INVALID_OR_EXPIRED_CODE);
+
 export const verifyEmail = async ({ email, code }) => {
   const user = await User.findOne({ email }).lean();
-  if (!user || user.emailVerified) {
-    throw new AppError(
-      "The code is invalid or has expired",
-      400,
-      ErrorCodes.INVALID_OR_EXPIRED_CODE,
-    );
-  }
+  if (!user || user.emailVerified) throw invalidCode();
   await consumeCode(user._id, OtpPurpose.VERIFY_EMAIL, code);
   const verified = await User.findByIdAndUpdate(
     user._id,
     { $set: { emailVerified: true } },
     { returnDocument: "after" },
   ).lean();
+  // Deleted meanwhile by the unverified-accounts job.
+  if (!verified) throw invalidCode();
   return issueCustomerSession(verified);
 };

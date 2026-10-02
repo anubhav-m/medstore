@@ -33,7 +33,8 @@ backend/
     │   ├── customers/        # admin side: block / unblock
     │   └── reports/          # daily summary
     ├── services/             # integrations only: storage.js, email.js, push.js, googleAuth.js
-    ├── jobs/                 # expireUnconfirmedBills.js, deleteUnusedUploads.js
+    ├── jobs/                 # schedule.js, expireUnconfirmedBills.js, deleteUnusedUploads.js,
+    │                         # deleteUnverifiedAccounts.js
     ├── routes/               # customer.routes.js (/api/v1), admin.routes.js (/api/v1/admin)
     └── utils/                # AppError (+ invalidToken), sendSuccess, pagination, time (IST), money, escapeRegex,
                               # geo (lat/lng ↔ GeoJSON), idParams (+ objectId), phone (Indian phone schema)
@@ -81,9 +82,9 @@ app.set("trust proxy", env.TRUST_PROXY);
 app.use(requestId);                          // always generated; incoming X-Request-Id ignored
 app.use(helmet());
 app.use(requestLogger);
+app.use(healthRoutes);                        // before the limiter: health checks share one IP
 app.use(createRateLimit(rateLimits.global)); // before body parsing, so bad bodies are still counted
 app.use(express.json({ limit: "100kb" }));
-app.use(healthRoutes);
 app.use("/api/v1/admin", adminRoutes);       // added by the admin features
 app.use("/api/v1", customerRoutes);          // added by the customer features
 app.use(notFound);      // AppError 404 ROUTE_NOT_FOUND
@@ -123,6 +124,8 @@ export const confirmBill = async (req, res, next) => {
 | Mongo duplicate key (`code 11000`)         | 409     | `DUPLICATE_RESOURCE` (name the field, never the value) |
 | Malformed JSON (`entity.parse.failed`)     | 400     | `INVALID_JSON`                                         |
 | Body too large (`entity.too.large`)        | 413     | `PAYLOAD_TOO_LARGE`                                    |
+| Other body-parser 4xx (charset, encoding…) | 400     | `INVALID_JSON`                                         |
+| Undecodable path param (`URIError`, 400)   | 400     | `INVALID_ID`                                           |
 | JWT expired / invalid                      | 401     | `TOKEN_EXPIRED` / `INVALID_TOKEN`                      |
 | Rate limit exceeded                        | 429     | `TOO_MANY_REQUESTS`                                    |
 | Mongo connection / server-selection errors | 503     | `SERVICE_UNAVAILABLE`                                  |
@@ -205,9 +208,10 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
   - From `crypto.randomInt`, one active code per user and purpose (a new code replaces the old document).
   - Stored as HMAC-SHA256 keyed with `OTP_HMAC_SECRET` (a plain hash of 6 digits is reversible offline) and compared with `crypto.timingSafeEqual`.
   - `expiresAt` is checked in code, not only by the TTL index.
-  - Wrong guesses 1–4 → `INVALID_OR_EXPIRED_CODE`; the 5th deletes the code → `TOO_MANY_ATTEMPTS`. A correct code is consumed by one conditional delete, so it works once.
+  - Every guess first takes an attempt with one conditional `$inc` (`attempts < 5`, not expired), then compares, so a code is compared at most 5 times however many guesses arrive at once. Wrong guesses 1–4 → `INVALID_OR_EXPIRED_CODE`; the 5th deletes the code → `TOO_MANY_ATTEMPTS`. A correct code is consumed by one conditional delete (matching its hash), so it works once.
   - Never log codes.
 - Code sends: every request to send a code is recorded in `codeSends` **whether or not the email has an account**. The 60 s per email+purpose cooldown and the 5 per email per hour cap (root 3.8) are counted from it, so `429 TOO_MANY_REQUESTS` answers identically for known and unknown emails.
+  - The checks and the insert run in one transaction that first bumps the email's `codeSendLocks` document, so concurrent requests for one email run one at a time and the limits stay exact. The lock is upserted just before the transaction (concurrent first upserts inside one could fail with a non-transient duplicate key).
   - `register`: a provider failure → `503 SERVICE_UNAVAILABLE`. The account is kept and the send released, so `resend-code` works at once.
   - `resend-code` / `forgot-password`: a provider failure is logged and the generic success returned (a 503 would reveal that the email exists).
   - `login` on an unverified account sends a code only if the limits allow (silently skipped otherwise) and always answers `EMAIL_NOT_VERIFIED`.
@@ -240,7 +244,7 @@ Controllers **never** call `res.json()` / `res.send()` directly. Success goes th
 
 ### Rate limits
 
-Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `customerReauth` (10 per 15 min per customer, keyed by `customerKey`; `DELETE /me`), `adminLogin` (per username, failed only), `adminLoginIp` (per IP, failed only; admin login and change-password) and `orderCreate` (10 per hour per customer, keyed by `customerKey` after `authCustomer`; one limiter instance shared by `POST /orders` and reorder). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. The per-email code-send and per-customer upload-URL limits are **domain limits** (numbers in `@medstore/shared`), counted from the database in `otp.service.js` and `upload.service.js`, not `express-rate-limit` — the upload day is the IST calendar day, which a rolling window can't express. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
+Values from root 3.8. The limiters in `config/rateLimits.js` are `global`, `authIp` (register, google, resend-code, forgot-password), `customerLogin` (per IP+email), `customerLoginIp` (per IP, failed only — customers share IPs behind carrier NAT), `codeCheck` (verify-email, reset-password), `refresh` (both worlds), `logout` (both worlds, per IP), `customerReauth` (10 per 15 min per customer, keyed by `customerKey`; one limiter instance shared by `POST /me/password` and `DELETE /me`), `adminLogin` (per username, failed only), `adminLoginIp` (per IP, failed only; admin login and change-password) and `orderCreate` (10 per hour per customer, keyed by `customerKey` after `authCustomer`; one limiter instance shared by `POST /orders` and reorder). Strict on `/auth/*` and `/admin/auth/*` (login, register, codes, refresh), on code sends per email, on upload URLs and on order creation/reorder per customer. The per-email code-send and per-customer upload-URL limits are **domain limits** (numbers in `@medstore/shared`), counted from the database in `otp.service.js` and `upload.service.js`, not `express-rate-limit` — the upload day is the IST calendar day, which a rolling window can't express. A sane global limit on everything else. The limiter uses the default in-memory store (one Render instance — §15); moving to several instances means moving it to a shared store. `app.set("trust proxy", env.TRUST_PROXY)` so limits see real client IPs and `X-Forwarded-For` can't be spoofed.
 
 ## 7. API surface
 
@@ -261,7 +265,7 @@ Customer — `/api/v1`:
 | `POST /auth/logout` | `{ refreshToken, pushToken? }`; `pushToken` is removed from the refresh token's account (§6); always succeeds | — |
 | `GET /me` | `{ user: CustomerProfile }`: auth fields + `isBlocked`, `hasPassword`, `name`, `phone`, `dob`, `gender`, `consentAcceptedAt`, `consentVersion` (auth endpoints still return `AuthUser`) | — |
 | `PATCH /me` | `{ name?, phone?, dob?, gender? }`, at least one; `null` clears `dob` / `gender` | — |
-| `POST /me/password` | `{ currentPassword, newPassword }` → fresh tokens | `INVALID_CREDENTIALS` (also when the account has no password) |
+| `POST /me/password` | `{ currentPassword, newPassword }` → `AuthSession` (fresh tokens for this device). A new password equal to the current one → `VALIDATION_ERROR` on `newPassword`. Revokes every session and push token; the update matches the verified hash, so a reset in between isn't overwritten. `customerReauth` limiter. Not †: works before onboarding | `INVALID_CREDENTIALS` (also when the account has no password) |
 | `DELETE /me` | exactly one of `{ password }` / `{ googleIdToken }` (§6); no data in the response. Not †: works before onboarding | `INVALID_CREDENTIALS`, `ACCOUNT_HAS_OPEN_ORDERS` |
 | `POST /me/onboarding` | `{ name, phone, address, consentAccepted: true }` → `{ user, address }` | `ONBOARDING_ALREADY_COMPLETED` |
 | `POST /me/push-tokens` · `DELETE /me/push-tokens` | `{ token }` in the body (never in the URL), an Expo push token (≤ 200 chars, SDK check); no data in the response. POST makes it the account's newest (≤ 10 kept) and removes it from every other customer and admin; DELETE removes it from the caller only. Not †: works before onboarding and for blocked customers | — |
@@ -296,7 +300,7 @@ Admin — `/api/v1/admin`:
 | `POST /orders/:id/reject` | `{ reasonCode, note? }` (`RejectReason`; `note` required for `OTHER`) → `{ order: AdminOrder }` | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
 | `POST /orders/:id/bill` | `{ expectedBillVersion, items[{ name, quantity, unitPricePaise }], deliveryFeePaise?, discountPaise? }`; creates (version 0 → 1) or revises (version + 1); fee defaults to the order's current one, discount to 0; client totals are a 400 | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED`, `BILL_CHANGED` |
 | `POST /orders/:id/pack` · `/dispatch` | | `ORDER_NOT_FOUND`, `INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED` |
-| `POST /orders/:id/deliver` | `{ cashCollectedPaise }` (integer ≥ 0, no other cap) | same as above |
+| `POST /orders/:id/deliver` | `{ cashCollectedPaise }` (integer 0 – `CASH_COLLECTED_MAX_PAISE`, so report sums stay exact) | same as above |
 | `POST /orders/:id/fail` · `/cancel` | `{ reasonCode, note? }` (`DeliveryFailedReason` / `StaffCancelReason`) | same as above |
 | `GET /item-suggestions?storeId=&q=` | `{ suggestions: string[] }`: `q` 1–50 chars; distinct names (latest spelling), sorted, ≤ 10 | `STORE_NOT_FOUND` |
 | `GET /stores` | `{ stores: AdminStore[] }`: scoped stores by code (owner: all, including inactive); not paginated | — |
@@ -345,6 +349,7 @@ uploads        userId, path, contentType, sizeBytes (as declared), attachedAt (n
 refreshTokens  tokenHash, subjectKind (CUSTOMER | ADMIN), subjectId, expiresAt, revokedAt?, rotatedAt?
 otpCodes       userId, purpose (VERIFY_EMAIL | RESET_PASSWORD), codeHash (HMAC), attempts, expiresAt
 codeSends      email, purpose — one per code-send request, kept 1 hour (per-email send limits)
+codeSendLocks  _id (email), seq — bumped first in every code-send reservation; kept 1 hour after last use
 counters       _id (store code), seq — never reset
 ```
 
@@ -352,7 +357,7 @@ counters       _id (store code), seq — never reset
 
 - `toJSON` strips `__v`, `passwordHash` and other secrets. Customers never receive `statusHistory[].by.id`.
 - **Index every field you query, sort or keep unique.** Required indexes:
-  - `users`: `email` unique; `googleId` unique sparse; `pushTokens.token` (moving a token between accounts)
+  - `users`: `email` unique; `googleId` unique sparse; `pushTokens.token` (moving a token between accounts); `updatedAt` partial on `emailVerified: false` (unverified-accounts job)
   - `admins`: `username` unique; `pushTokens.token`
   - `stores`: `code` unique; `location` 2dsphere
   - `addresses`: `{ userId, createdAt: -1 }`; `userId` unique with `partialFilterExpression: { isDefault: true }` (at most one default, enforced by the database)
@@ -361,9 +366,10 @@ counters       _id (store code), seq — never reset
   - `refreshTokens`: `tokenHash` unique; `{ subjectKind, subjectId }`; TTL on `expiresAt`
   - `otpCodes`: `{ userId, purpose }` unique; TTL on `expiresAt`
   - `codeSends`: `{ email, createdAt }`; TTL of 1 hour on `createdAt`
+  - `codeSendLocks`: TTL of 1 hour on `updatedAt`
 - **Every unbounded list endpoint is paginated** (default 20, max 100). Bounded lists (addresses ≤ 10, stores) are not. Never `Model.find()` without a limit.
 - Reads use `.lean()` and projections. No N+1 loops — use `$in` or aggregation.
-- Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use a transaction (`mongoose.connection.transaction`, which retries transient conflicts) when several documents must change together: onboarding (profile + first address), address writes (user lock + count / default switch + write), order creation/reorder (user lock + count + insert + marking uploads attached), push-token registration (claim on the caller + removal from every other account) and account deletion. Local and test Mongo run as a single-node replica set.
+- Keep a state change inside **one document** where possible (order status, history and bill live on the order), so single-document atomicity is enough. Use a transaction (`mongoose.connection.transaction`, which retries transient conflicts) when several documents must change together: onboarding (profile + first address), address writes (user lock + count / default switch + write), order creation/reorder (user lock + upload records re-checked + count + insert + marking uploads attached), code-send reservations (email lock + limit counts + insert), push-token registration (claim on the caller + removal from every other account) and account deletion. Local and test Mongo run as a single-node replica set.
 - Idempotency: look up `(userId, idempotencyKey)` before anything else, and again inside the creation transaction right after `$inc orderCreateSeq`. That write serialises one customer's creates, so a concurrent request with the same key finds the winner's order there and returns it (even at 2 open orders, where it would otherwise fail check 6). The unique index stays as the database-level guarantee.
 - Daily report (`reports/report.service.js`): the IST day comes from `istDayBounds(date)` (`utils/time.js`; start inclusive, end exclusive). Two aggregations run in parallel: created orders grouped by status (`{ storeId, status, createdAt }` index), and delivered orders by `deliveredAt` (`{ storeId, deliveredAt }` index) with a `$facet` for totals, the mismatch count and the limited mismatch list.
 - Order numbers: `counter.model.js` `nextOrderNumber(storeCode)` — an atomic `$inc` upsert run just **before** the creation transaction (a failed create leaves a gap; inside the transaction, concurrent first upserts could fail with a non-transient duplicate key).
@@ -418,22 +424,26 @@ counters       _id (store code), seq — never reset
 
 ## 10. Jobs
 
-Each job is an exported function taking `now`, so tests call it directly. `server.js` schedules them with `setInterval` and clears them on shutdown. With one always-on instance (§15) that is enough; every job is safe to run twice.
+Each job is an exported function taking `now`, so tests call it directly. `server.js` starts them and clears them on shutdown. `jobs/schedule.js` holds the shared pieces: `startJob(name, run, intervalMs)` (`setInterval`; a failed run is logged with the job name) and `skipWhileRunning(run)` (a tick that fires while the previous run is still going returns `null`). With one always-on instance (§15) that is enough; every job is safe to run twice.
 
 - `jobs/expireUnconfirmedBills.js` — every 5 minutes (`startBillExpiryJob()`, which returns its stop function): cancels `AWAITING_CONFIRMATION` orders with `billExpiresAt <= now` using the same conditional transition as everything else (`EXPIRE_BILL`, `by.kind: SYSTEM`, cancellation `{ byKind: SYSTEM, code: BILL_EXPIRED }` — `SystemCancelReason` in `shared` — and the history note "Bill not confirmed in time"); `transitionOrder` sends the root 3.6 notifications itself.
   - Selection is by `billExpiresAt` (which already holds the timeout and the closing-time cap), never recomputed from `billSentAt`. At most 100 orders per run, earliest expiry first (`{ status, billExpiresAt }` index); the rest wait for the next tick.
   - Each update also matches the `billVersion` the job read, so a bill revised after the query (new expiry) is never cancelled.
   - An order confirmed, cancelled or revised meanwhile (`INVALID_ORDER_TRANSITION`, `ORDER_STATUS_CHANGED`, `BILL_CHANGED`) is counted as skipped, not an error. Any other failure is logged with the order id only, and the batch continues. `expireUnconfirmedBills(now)` returns `{ expired, skipped, failed }`.
-  - `runScheduledBillExpiry` skips a tick (returns `null`) while the previous run is still going. Overlapping runs (e.g. two instances) are still safe: each order is cancelled once.
-- Push receipts — checks Expo push receipts and deletes tokens they report as `DeviceNotRegistered` (§9). Needs the ticket ids stored when sending; designed in the jobs session.
-- `jobs/deleteUnusedUploads.js` — hourly: for uploads with no `attachedAt` created more than 24 hours ago, deletes the storage object, then the record.
+  - `runScheduledBillExpiry` (`skipWhileRunning`) skips a tick (returns `null`) while the previous run is still going. Overlapping runs (e.g. two instances) are still safe: each order is cancelled once.
+- Push receipts (not built yet) — checks Expo push receipts and deletes tokens they report as `DeviceNotRegistered` (§9). Needs the ticket ids stored when sending; designed in the jobs session.
+- `jobs/deleteUnusedUploads.js` — hourly, at most 500 per run, oldest first: uploads with no `attachedAt` created more than 24 hours ago (signed upload URLs last 2 hours, so nothing can still arrive).
+  - Skips any path an order references (and marks its record attached), so a shared image is never deleted.
+  - Claims each record with a conditional delete (`attachedAt: null`) **before** deleting objects, then deletes the claimed objects in one `removeObjects` call. If that call fails, the records are inserted back unchanged so the next run retries.
+  - Order creation re-counts the upload records inside its transaction (check 5 again). The job's conditional delete and the creation's `attachedAt` update conflict, so an order either attaches the upload first (the job leaves it) or finds it gone (`INVALID_UPLOAD`) — never an order pointing at a deleted object.
+- `jobs/deleteUnverifiedAccounts.js` — hourly, at most 500 per run: deletes accounts with `emailVerified: false` whose `updatedAt` is more than 7 days old and that have no live code (their owner may be verifying right now). Registering again bumps `updatedAt`. Such accounts never had tokens, so they own no sessions, addresses or orders. `verify-email` answers `INVALID_OR_EXPIRED_CODE` if the account disappears while its code is checked.
 - There is no retention job: orders and images attached to orders are kept (root D1).
 
 ## 11. Security, logging, lifecycle
 
 - `helmet()`, `x-powered-by` disabled, 100 kb body limit (no files pass through the API), rate limiting.
 - **CORS**: native apps are not subject to CORS, so no CORS middleware is installed. If a web client is added later, add an allow-list from a new env var — never bare `cors()`.
-- Pino + `pino-http` (`quietReqLogger`/`quietResLogger`, so `req.log` is bound to `reqId` only) with a request id on every line. Request logs record method, **route pattern** (`req.baseUrl + req.route.path` captured by `recordRoutePattern` when the router matches — Express resets `baseUrl` before a failed request is logged — or `unmatched`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, signed URLs, codes, phone, address, patient name, notes and bill items (top level and up to two levels deep). `code` is redacted **only** under `req.body` / `body` (OTP codes) — elsewhere it carries error codes that logs must keep. No `console.*`.
+- Pino + `pino-http` (`quietReqLogger`/`quietResLogger`, so `req.log` is bound to `reqId` only) with a request id on every line. Request logs record method, **route pattern** (`req.baseUrl + req.route.path` captured by `recordRoutePattern` when the router matches — Express resets `baseUrl` before a failed request is logged — or `unmatched`), status and duration — never `req.url` or the query string. `redact` authorization headers, cookies, passwords, tokens, signed URLs, codes, email, phone, date of birth, address (and its `line1`, `line2`, `landmark`, `location`, `lat`, `lng`), patient name, notes, reasons, bill items, image paths and the search query `q` (top level and up to two levels deep). `code` and `name` are redacted **only** under `req.body` / `body` (OTP codes, customer names) — elsewhere they carry error codes and error names that logs must keep. No `console.*`.
 - `GET /health` reports process + DB readiness as `{ status, db }` — no versions, hostnames or error details.
 - Graceful shutdown on `SIGTERM`/`SIGINT`: stop accepting connections, clear jobs, finish in-flight requests, close Mongo, exit (with a hard timeout). Windows has no `SIGTERM` — test shutdown locally with Ctrl+C (`SIGINT`); `node --watch` restarts without running the handler.
 
@@ -466,9 +476,9 @@ EXPO_ACCESS_TOKEN
 BILL_CONFIRMATION_TIMEOUT_MINUTES     # 60 in .env.example
 ```
 
-All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
+All validated by Zod in `config/env.js` (`parseEnv(source)`, exported for tests); the app refuses to start and lists every missing or malformed variable by **name** (never the value). `TRUST_PROXY` is the number of proxy hops in front of the app (`0` locally; at least `1` when `NODE_ENV=production`, since Render is a proxy and `0` would put every client in one rate-limit bucket). `LOG_LEVEL` is one of `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent`.
 
-**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY`, `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend), `SUPABASE_URL` (the bare https project URL — no `/rest/v1` or other path), `SUPABASE_SECRET_KEY` (must start with `sb_secret_`), `SUPABASE_BUCKET` (lowercase bucket name; `prescriptions`), `BILL_CONFIRMATION_TIMEOUT_MINUTES` (1–1440), `EXPO_ACCESS_TOKEN` (optional; empty counts as absent; required once enhanced push security is on in the Expo project). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
+**Only these exist so far:** `NODE_ENV`, `PORT`, `MONGODB_URI`, `LOG_LEVEL`, `TRUST_PROXY`, `JWT_CUSTOMER_ACCESS_SECRET`, `JWT_ADMIN_ACCESS_SECRET`, `OTP_HMAC_SECRET`, `GOOGLE_WEB_CLIENT_ID`, `EMAIL_API_KEY` (a Resend key, `re_…`), `EMAIL_FROM` (`address@domain` or `Name <address@domain>`; the domain must be verified in Resend), `SUPABASE_URL` (the bare https project URL — no `/rest/v1` or other path), `SUPABASE_SECRET_KEY` (must start with `sb_secret_`), `SUPABASE_BUCKET` (lowercase bucket name; `prescriptions`), `BILL_CONFIRMATION_TIMEOUT_MINUTES` (1–1440), `EXPO_ACCESS_TOKEN` (optional; empty counts as absent; required once enhanced push security is on in the Expo project). Each other variable above is added — to `env.js` and `.env.example` — by the feature that first uses it. `CORS_ORIGINS` is added only if a web client ever exists.
 
 Local development uses a separate Atlas dev cluster (or Docker `mongo` started with `--replSet rs0`). A MongoDB installed as a Windows service starts standalone; it needs `replication.replSetName` in `mongod.cfg` and a one-time `rs.initiate()` before transactions work.
 

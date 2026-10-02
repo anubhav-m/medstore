@@ -97,6 +97,12 @@ describe("POST /admin/auth/refresh", () => {
     expectInvalidToken(await adminRefresh(app, "unknown"));
     expectError(await adminRefresh(app, "unknown"), 429, ErrorCodes.TOO_MANY_REQUESTS);
   });
+
+  it("limits logouts per IP with 429 TOO_MANY_REQUESTS", async () => {
+    app = createApp({ rateLimits: { logout: { windowMs: 60_000, limit: 1 } } });
+    await adminLogout(app, "unknown").expect(200);
+    expectError(await adminLogout(app, "unknown"), 429, ErrorCodes.TOO_MANY_REQUESTS);
+  });
 });
 
 describe("refresh tokens never cross between customers and admins", () => {

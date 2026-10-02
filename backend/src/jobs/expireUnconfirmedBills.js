@@ -8,6 +8,7 @@ import {
 import { logger } from "../config/logger.js";
 import { Order } from "../modules/orders/order.model.js";
 import { transitionOrder } from "../modules/orders/orderTransition.js";
+import { skipWhileRunning, startJob } from "./schedule.js";
 
 const BILL_EXPIRY_INTERVAL_MS = 5 * 60 * 1000;
 // Bounds one run; anything left over is picked up by the next tick.
@@ -71,27 +72,8 @@ export const expireUnconfirmedBills = async (now = new Date()) => {
   return result;
 };
 
-let running = false;
-
 // A tick that fires while the previous run is still going is skipped (returns null).
-export const runScheduledBillExpiry = async (now = new Date()) => {
-  if (running) return null;
-  running = true;
-  try {
-    return await expireUnconfirmedBills(now);
-  } finally {
-    running = false;
-  }
-};
+export const runScheduledBillExpiry = skipWhileRunning(expireUnconfirmedBills);
 
-// Started by server.js only — never by createApp() or tests. Returns the function that stops it.
-export const startBillExpiryJob = () => {
-  const timer = setInterval(async () => {
-    try {
-      await runScheduledBillExpiry();
-    } catch (error) {
-      logger.error({ err: error }, "bill expiry run failed");
-    }
-  }, BILL_EXPIRY_INTERVAL_MS);
-  return () => clearInterval(timer);
-};
+export const startBillExpiryJob = () =>
+  startJob("bill expiry", runScheduledBillExpiry, BILL_EXPIRY_INTERVAL_MS);

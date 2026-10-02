@@ -15,24 +15,40 @@ const SENSITIVE_KEYS = [
   "signedUrl",
   // Signed photo view URLs carry their token too.
   "imageUrls",
+  "email",
   "phone",
   "customerPhone",
   "customerName",
+  "dob",
   "address",
   "deliveryAddress",
+  "line1",
+  "line2",
+  "landmark",
+  "location",
+  "lat",
+  "lng",
   "patientName",
   "note",
   "customerNote",
+  "reason",
+  "blockReason",
   "items",
+  "imagePaths",
+  "images",
+  // Admin order search: an order number or a phone number.
+  "q",
 ];
 
-// `code` is redacted only inside request bodies (OTP codes): elsewhere it holds error codes
-// such as VALIDATION_ERROR, which logs must keep.
+// `code` and `name` are redacted only inside request bodies (OTP codes, customer names):
+// elsewhere they hold error codes such as VALIDATION_ERROR and error names, which logs must keep.
 const REDACT_PATHS = [
   "req.headers.authorization",
   "req.headers.cookie",
   "req.body.code",
   "body.code",
+  "req.body.name",
+  "body.name",
   ...SENSITIVE_KEYS.flatMap((key) => [key, `*.${key}`, `*.*.${key}`]),
 ];
 

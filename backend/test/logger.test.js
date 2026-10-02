@@ -53,9 +53,39 @@ describe("logger redaction", () => {
     expect(logged.session.accessToken).toBe("[REDACTED]");
   });
 
-  it("keeps error codes visible", () => {
-    const logged = captureLog({ code: "VALIDATION_ERROR", err: { code: "STORE_CLOSED" } });
+  it("redacts every kind of personal data a body or query can carry", () => {
+    const keys = [
+      "email",
+      "dob",
+      "line1",
+      "line2",
+      "landmark",
+      "location",
+      "lat",
+      "lng",
+      "reason",
+      "blockReason",
+      "imagePaths",
+      "images",
+      "q",
+    ];
+    const values = Object.fromEntries(keys.map((key) => [key, `${key}-value`]));
+    const logged = captureLog({ ...values, req: { body: { name: "Asha Rao", ...values } } });
+
+    for (const key of keys) {
+      expect(logged[key]).toBe("[REDACTED]");
+      expect(logged.req.body[key]).toBe("[REDACTED]");
+    }
+    expect(logged.req.body.name).toBe("[REDACTED]");
+  });
+
+  it("keeps error codes and names visible", () => {
+    const logged = captureLog({
+      code: "VALIDATION_ERROR",
+      err: { code: "STORE_CLOSED", name: "AppError" },
+    });
     expect(logged.code).toBe("VALIDATION_ERROR");
     expect(logged.err.code).toBe("STORE_CLOSED");
+    expect(logged.err.name).toBe("AppError");
   });
 });

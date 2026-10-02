@@ -13,7 +13,7 @@ export default defineConfig({
       JWT_ADMIN_ACCESS_SECRET: "test-admin-access-secret-0123456789abcdef0",
       OTP_HMAC_SECRET: "test-otp-hmac-secret-0123456789abcdef0123",
       GOOGLE_WEB_CLIENT_ID: "test-client.apps.googleusercontent.com",
-      EMAIL_API_KEY: "test-email-api-key",
+      EMAIL_API_KEY: "re_test-email-api-key",
       EMAIL_FROM: "MedStore <no-reply@example.com>",
       SUPABASE_URL: "https://test-project.supabase.co",
       SUPABASE_SECRET_KEY: "sb_secret_test-key",

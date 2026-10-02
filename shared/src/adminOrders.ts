@@ -216,7 +216,7 @@ export interface SendBillRequest {
   discountPaise?: number;
 }
 
-/** Recorded as given (an integer ≥ 0); it may differ from the total. */
+/** Recorded as given (an integer from 0 to `CASH_COLLECTED_MAX_PAISE`); it may differ from the total. */
 export interface DeliverOrderRequest {
   cashCollectedPaise: number;
 }

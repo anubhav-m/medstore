@@ -1,4 +1,5 @@
 import {
+  CASH_COLLECTED_MAX_PAISE,
   DeliveryFailedReason,
   ErrorCodes,
   HistoryActorKind,
@@ -217,11 +218,18 @@ describe("POST /admin/orders/:id/deliver", () => {
     expect(res.body.data.order.cashCollectedPaise).toBe(0);
   });
 
+  it("accepts cash up to the largest possible bill total", async () => {
+    const order = await seed(S.OUT_FOR_DELIVERY);
+    const res = await post(order._id, "deliver", { cashCollectedPaise: CASH_COLLECTED_MAX_PAISE });
+    expect(res.body.data.order.cashCollectedPaise).toBe(CASH_COLLECTED_MAX_PAISE);
+  });
+
   it.each([
     ["missing", {}],
     ["negative", { cashCollectedPaise: -1 }],
     ["a decimal", { cashCollectedPaise: 75.5 }],
     ["a string", { cashCollectedPaise: "7500" }],
+    ["above the largest possible bill total", { cashCollectedPaise: CASH_COLLECTED_MAX_PAISE + 1 }],
     ["beyond a safe integer", { cashCollectedPaise: 1e20 }],
     ["null", { cashCollectedPaise: null }],
     ["an extra field", { cashCollectedPaise: 7500, paymentStatus: "PENDING" }],

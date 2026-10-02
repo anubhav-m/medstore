@@ -63,6 +63,8 @@ describe("parseEnv", () => {
     ["JWT_ADMIN_ACCESS_SECRET", "too-short-secret"],
     ["OTP_HMAC_SECRET", "too-short-secret"],
     ["GOOGLE_WEB_CLIENT_ID", "not-a-client-id"],
+    ["EMAIL_API_KEY", "sk_live_example"],
+    ["EMAIL_API_KEY", "re_has space"],
     ["EMAIL_FROM", "MedStore"],
     ["EMAIL_FROM", "MedStore <no-reply>"],
     ["SUPABASE_URL", "http://abcdefghijklmnop.supabase.co"],
@@ -97,6 +99,13 @@ describe("parseEnv", () => {
     ["set", "expo-access-token", "expo-access-token"],
   ])("treats an EXPO_ACCESS_TOKEN that is %s as optional", (_label, value, expected) => {
     expect(parseEnv({ ...valid, EXPO_ACCESS_TOKEN: value }).EXPO_ACCESS_TOKEN).toBe(expected);
+  });
+
+  it("requires at least one proxy hop in production only", () => {
+    expect(errorMessage({ ...valid, TRUST_PROXY: "0" })).toContain(
+      "TRUST_PROXY: must be at least 1 in production",
+    );
+    expect(parseEnv({ ...valid, NODE_ENV: "development", TRUST_PROXY: "0" }).TRUST_PROXY).toBe(0);
   });
 
   it("accepts a bare EMAIL_FROM address", () => {

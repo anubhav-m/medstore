@@ -130,6 +130,11 @@ export const createSignedViewUrls = async (paths) => {
   return urls;
 };
 
+// Deletes the objects at `paths` (at most 1000) in one call; an object already gone isn't an error.
+export const removeObjects = async (paths) => {
+  await run("remove", () => bucket().remove(paths));
+};
+
 const mismatchedSettings = (saved) => {
   const savedTypes = [...(saved.allowed_mime_types ?? [])].sort();
   return [

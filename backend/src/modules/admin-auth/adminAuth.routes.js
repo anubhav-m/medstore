@@ -16,6 +16,7 @@ export const createAdminAuthRoutes = (rateLimits) => {
     skipSuccessfulRequests: true,
   });
   const refresh = createRateLimit(rateLimits.refresh);
+  const logout = createRateLimit(rateLimits.logout);
 
   router.post(
     "/auth/login",
@@ -25,7 +26,7 @@ export const createAdminAuthRoutes = (rateLimits) => {
     controller.login,
   );
   router.post("/auth/refresh", refresh, validate(schemas.refreshSchema), controller.refresh);
-  router.post("/auth/logout", validate(schemas.logoutSchema), controller.logout);
+  router.post("/auth/logout", logout, validate(schemas.logoutSchema), controller.logout);
   router.post(
     "/auth/change-password",
     failedPerIp,

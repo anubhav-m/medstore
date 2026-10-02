@@ -107,6 +107,18 @@ describe("POST /auth/login", () => {
     expect(limited.body.code).toBe(ErrorCodes.TOO_MANY_REQUESTS);
     await login(app, "other@example.com", "wrong password").expect(401);
   });
+
+  it("limits failed attempts per IP across emails, not counting successful logins", async () => {
+    app = createApp({ rateLimits: { customerLoginIp: { windowMs: 60_000, limit: 2 } } });
+    await registerAndVerify(app, EMAIL);
+    await login(app, EMAIL).expect(200);
+    await login(app, "one@example.com", "wrong password").expect(401);
+    await login(app, "two@example.com", "wrong password").expect(401);
+
+    const limited = await login(app, "three@example.com", "wrong password");
+    expect(limited.status).toBe(429);
+    expect(limited.body.code).toBe(ErrorCodes.TOO_MANY_REQUESTS);
+  });
 });
 
 describe("POST /auth/google", () => {

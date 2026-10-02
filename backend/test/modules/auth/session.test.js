@@ -78,6 +78,16 @@ describe("POST /auth/refresh", () => {
   });
 });
 
+describe("POST /auth/logout limits", () => {
+  it("limits logouts per IP with 429 TOO_MANY_REQUESTS", async () => {
+    app = createApp({ rateLimits: { logout: { windowMs: 60_000, limit: 1 } } });
+    await logout("unknown").expect(200);
+    const res = await logout("unknown");
+    expect(res.status).toBe(429);
+    expect(res.body.code).toBe(ErrorCodes.TOO_MANY_REQUESTS);
+  });
+});
+
 describe("POST /auth/logout", () => {
   it("revokes the refresh token", async () => {
     const session = await registerAndVerify(app, EMAIL);

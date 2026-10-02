@@ -75,6 +75,14 @@ const classify = (error) => {
   if (error?.type === "entity.too.large") {
     return new AppError("The request body is too large", 413, ErrorCodes.PAYLOAD_TOO_LARGE);
   }
+  // Any other body the parser refused (unsupported charset or encoding, aborted, wrong length).
+  if (typeof error?.type === "string" && error.status >= 400 && error.status < 500) {
+    return new AppError("The request body couldn't be read", 400, ErrorCodes.INVALID_JSON);
+  }
+  // The router failed to percent-decode a path param; path params are always ids.
+  if (error instanceof URIError && error.status === 400) {
+    return new AppError("Invalid id", 400, ErrorCodes.INVALID_ID);
+  }
   if (error?.name === "TokenExpiredError") {
     return new AppError("Your session has expired", 401, ErrorCodes.TOKEN_EXPIRED);
   }

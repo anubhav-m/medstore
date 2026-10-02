@@ -10,14 +10,19 @@ export const rateLimits = {
   authIp: { windowMs: FIFTEEN_MINUTES, limit: 20 },
   // per IP + email (root 3.8)
   customerLogin: { windowMs: FIFTEEN_MINUTES, limit: 10 },
+  // Failed customer logins per IP across emails (credential stuffing). Failed only: many customers
+  // share an IP behind mobile carriers' NAT.
+  customerLoginIp: { windowMs: FIFTEEN_MINUTES, limit: 30 },
   // verify-email, reset-password — per IP, on top of the attempts allowed per code
   codeCheck: { windowMs: FIFTEEN_MINUTES, limit: 20 },
   // Admin login and change-password count failed attempts only (root 3.8).
   adminLogin: { windowMs: FIFTEEN_MINUTES, limit: 5 }, // per username
   adminLoginIp: { windowMs: FIFTEEN_MINUTES, limit: 20 }, // per IP
   refresh: { windowMs: FIFTEEN_MINUTES, limit: 30 },
-  // Password / Google re-authentication of a signed-in customer (DELETE /me), per customer, so a
-  // stolen access token can't be used to guess the password.
+  // Customer and admin logout, per IP
+  logout: { windowMs: FIFTEEN_MINUTES, limit: 30 },
+  // Password / Google re-authentication of a signed-in customer (POST /me/password and DELETE /me,
+  // one shared counter), per customer, so a stolen access token can't be used to guess the password.
   customerReauth: { windowMs: FIFTEEN_MINUTES, limit: 10 },
   // Order creations + reorders, per customer (root 3.8)
   orderCreate: { windowMs: ONE_HOUR, limit: 10 },

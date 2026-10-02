@@ -15,7 +15,7 @@ import { notifyOrderPlaced } from "../notifications/orderNotifications.js";
 import { Upload } from "../uploads/upload.model.js";
 import { User } from "../users/user.model.js";
 import { nextOrderNumber } from "./counter.model.js";
-import { verifyOrderImages } from "./orderImages.js";
+import { invalidUpload, verifyOrderImages } from "./orderImages.js";
 import { orderNotFound } from "./orderTransition.js";
 import { Order } from "./order.model.js";
 import { presentOrder } from "./order.view.js";
@@ -91,6 +91,12 @@ const insertOrder = async ({ userId, idempotencyKey, imagePaths, now, ...fields 
     if (locked.matchedCount === 0) throw invalidToken();
     const existing = await findByIdempotencyKey(userId, idempotencyKey, session);
     if (existing) return { order: existing, created: false };
+
+    // Check 5 again inside the transaction: the unused-uploads job may have deleted a record (and
+    // its object) since the photos were verified. Its conditional delete conflicts with the
+    // update below, so one of the two always sees the other.
+    const issued = await Upload.countDocuments({ userId, path: { $in: imagePaths } }, { session });
+    if (issued !== imagePaths.length) throw invalidUpload();
 
     const open = await Order.countDocuments(
       { userId, status: { $in: OPEN_ORDER_STATUSES } },

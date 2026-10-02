@@ -76,3 +76,7 @@ export const DELIVERY_RADIUS_MAX_KM = 50;
 // Store hours are minutes after midnight IST, 0–1440, opening < closing.
 export const MINUTES_PER_DAY = 1440;
 export const DELIVERY_FEE_MAX_PAISE = 100_000;
+// The largest total any bill can reach. Cash recorded on delivery is capped at it, so a day's sums
+// in the report stay far below Number.MAX_SAFE_INTEGER.
+export const CASH_COLLECTED_MAX_PAISE =
+  MAX_BILL_ITEMS * BILL_ITEM_MAX_QUANTITY * BILL_UNIT_PRICE_MAX_PAISE + DELIVERY_FEE_MAX_PAISE;

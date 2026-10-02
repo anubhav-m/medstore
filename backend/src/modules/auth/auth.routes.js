@@ -9,8 +9,12 @@ export const createAuthRoutes = (rateLimits) => {
   const router = Router();
   const authIp = createRateLimit(rateLimits.authIp);
   const login = createRateLimit(rateLimits.customerLogin, { keyGenerator: ipAndEmailKey });
+  const failedLoginsPerIp = createRateLimit(rateLimits.customerLoginIp, {
+    skipSuccessfulRequests: true,
+  });
   const codeCheck = createRateLimit(rateLimits.codeCheck);
   const refresh = createRateLimit(rateLimits.refresh);
+  const logout = createRateLimit(rateLimits.logout);
 
   router.post("/register", authIp, validate(schemas.registerSchema), controller.register);
   router.post(
@@ -20,7 +24,7 @@ export const createAuthRoutes = (rateLimits) => {
     controller.verifyEmail,
   );
   router.post("/resend-code", authIp, validate(schemas.resendCodeSchema), controller.resendCode);
-  router.post("/login", login, validate(schemas.loginSchema), controller.login);
+  router.post("/login", failedLoginsPerIp, login, validate(schemas.loginSchema), controller.login);
   router.post("/google", authIp, validate(schemas.googleSchema), controller.google);
   router.post(
     "/forgot-password",
@@ -35,7 +39,7 @@ export const createAuthRoutes = (rateLimits) => {
     controller.resetPassword,
   );
   router.post("/refresh", refresh, validate(schemas.refreshSchema), controller.refresh);
-  router.post("/logout", validate(schemas.logoutSchema), controller.logout);
+  router.post("/logout", logout, validate(schemas.logoutSchema), controller.logout);
 
   return router;
 };

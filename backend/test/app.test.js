@@ -48,11 +48,31 @@ describe("app baseline", () => {
 
   it("returns 429 TOO_MANY_REQUESTS once the global limit is exceeded", async () => {
     const app = createApp({ rateLimits: { global: { windowMs: 60_000, limit: 2 } } });
-    await request(app).get("/health").expect(200);
-    await request(app).get("/health").expect(200);
-    const res = await request(app).get("/health");
+    await request(app).get("/does-not-exist").expect(404);
+    await request(app).get("/does-not-exist").expect(404);
+    const res = await request(app).get("/does-not-exist");
     expect(res.status).toBe(429);
     expect(res.body).toMatchObject({ success: false, code: "TOO_MANY_REQUESTS" });
+  });
+
+  it("never rate-limits the health check", async () => {
+    const app = createApp({ rateLimits: { global: { windowMs: 60_000, limit: 1 } } });
+    for (let call = 0; call < 3; call += 1) await request(app).get("/health").expect(200);
+  });
+
+  it.each([
+    ["an unsupported charset", { "Content-Type": "application/json; charset=latin1" }],
+    ["an unsupported encoding", { "Content-Type": "application/json", "Content-Encoding": "zip" }],
+  ])("returns 400 INVALID_JSON for a body with %s", async (_case, headers) => {
+    const res = await request(createApp()).post("/api/v1/auth/login").set(headers).send("{}");
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ success: false, code: "INVALID_JSON" });
+  });
+
+  it("returns 400 INVALID_ID for a path param that isn't valid percent-encoding", async () => {
+    const res = await request(createApp()).get("/api/v1/orders/%E0%A4%A");
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ success: false, message: "Invalid id", code: "INVALID_ID" });
   });
 
   it("reports healthy when the database is connected", async () => {

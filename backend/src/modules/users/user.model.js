@@ -57,5 +57,7 @@ userSchema.index({ email: 1 }, { unique: true });
 userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 // Registering a token removes it from every other account.
 userSchema.index({ "pushTokens.token": 1 });
+// The unverified-accounts job.
+userSchema.index({ updatedAt: 1 }, { partialFilterExpression: { emailVerified: false } });
 
 export const User = mongoose.model("User", userSchema);

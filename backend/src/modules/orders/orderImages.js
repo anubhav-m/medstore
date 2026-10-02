@@ -5,7 +5,7 @@ import { Upload } from "../uploads/upload.model.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 
-const invalidUpload = () =>
+export const invalidUpload = () =>
   new AppError(
     "A prescription photo couldn't be used. Please upload it again.",
     422,

@@ -64,3 +64,12 @@ export interface OnboardingResponse {
  * accounts send a fresh Google ID token. The response has no `data`.
  */
 export type DeleteAccountRequest = { password: string } | { googleIdToken: string };
+
+/**
+ * POST /me/password. Signs every other device out; `data` is a fresh `AuthSession` for this one.
+ * Accounts without a password (`hasPassword: false`) add one through forgot-password instead.
+ */
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}

@@ -32,7 +32,7 @@ const envSchema = z
     GOOGLE_WEB_CLIENT_ID: z
       .string()
       .regex(/^\S+\.apps\.googleusercontent\.com$/, "must be a Google OAuth web client id"),
-    EMAIL_API_KEY: z.string().min(1),
+    EMAIL_API_KEY: z.string().regex(/^re_\S+$/, 'must be a Resend API key ("re_…")'),
     EMAIL_FROM: z
       .string()
       .regex(EMAIL_FROM_PATTERN, 'must be "address@domain" or "Name <address@domain>"'),
@@ -57,6 +57,15 @@ const envSchema = z
       .transform((value) => value || undefined),
   })
   .superRefine((env, ctx) => {
+    // Production runs behind Render's proxy. With 0 hops every client would share the proxy's IP,
+    // and so one rate-limit bucket.
+    if (env.NODE_ENV === "production" && env.TRUST_PROXY === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TRUST_PROXY"],
+        message: "must be at least 1 in production (the app runs behind a proxy)",
+      });
+    }
     // A shared secret would let a token or code from one world pass as another.
     for (const [index, key] of SECRET_KEYS.entries()) {
       const earlier = SECRET_KEYS.slice(0, index).find((other) => env[other] === env[key]);

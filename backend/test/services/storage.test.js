@@ -5,6 +5,7 @@ import {
   createSignedUploadUrl,
   createSignedViewUrls,
   ensureBucket,
+  removeObjects,
   verifyImageObject,
 } from "../../src/services/storage.js";
 
@@ -14,6 +15,7 @@ const { storage, bucketFiles } = vi.hoisted(() => {
     info: vi.fn(),
     createSignedUrl: vi.fn(),
     createSignedUrls: vi.fn(),
+    remove: vi.fn(),
   };
   return {
     bucketFiles,
@@ -255,6 +257,23 @@ describe("createSignedViewUrls", () => {
   ])("returns 503 SERVICE_UNAVAILABLE when %s", async (_case, arrange) => {
     arrange();
     await expect(createSignedViewUrls(["u/a.jpg", "u/b.png"])).rejects.toMatchObject({
+      code: ErrorCodes.SERVICE_UNAVAILABLE,
+    });
+  });
+});
+
+describe("removeObjects", () => {
+  it("deletes every path in one call", async () => {
+    bucketFiles.remove.mockResolvedValue(ok([{ name: "u/a.jpg" }]));
+
+    await removeObjects(["u/a.jpg", "u/b.png"]);
+
+    expect(bucketFiles.remove).toHaveBeenCalledExactlyOnceWith(["u/a.jpg", "u/b.png"]);
+  });
+
+  it("returns 503 SERVICE_UNAVAILABLE when the call fails", async () => {
+    bucketFiles.remove.mockResolvedValue(failed(500));
+    await expect(removeObjects(["u/a.jpg"])).rejects.toMatchObject({
       code: ErrorCodes.SERVICE_UNAVAILABLE,
     });
   });

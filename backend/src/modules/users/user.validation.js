@@ -10,6 +10,7 @@ import { z } from "zod";
 import { indianPhone } from "../../utils/phone.js";
 import { istDateString } from "../../utils/time.js";
 import { addressInput } from "../addresses/address.validation.js";
+import { customerPassword } from "../auth/auth.validation.js";
 
 const PHONE_INVALID = "Enter a 10-digit mobile number";
 
@@ -49,6 +50,20 @@ export const onboardingSchema = {
     address: addressInput,
     consentAccepted: z.literal(true, { error: "Accept the terms and privacy policy to continue" }),
   }),
+};
+
+// The current password must be correct for the change to succeed, so comparing the strings is
+// the same as comparing against the stored hash. It is bounded only, like at login.
+export const changePasswordSchema = {
+  body: z
+    .strictObject({
+      currentPassword: z.string().min(1).max(CUSTOMER_PASSWORD_MAX_LENGTH),
+      newPassword: customerPassword,
+    })
+    .refine((body) => body.newPassword !== body.currentPassword, {
+      path: ["newPassword"],
+      message: "Choose a password different from your current one",
+    }),
 };
 
 // Exactly one way to re-authenticate. The password is bounded only, like at login.
