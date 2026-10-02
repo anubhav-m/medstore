@@ -45,7 +45,7 @@ The API types are hand-written (the backend validates with Zod in JavaScript), s
 | Push | Expo push service with enhanced push security (`expo-server-sdk` on the backend, `expo-notifications` in apps) |
 | Email | Resend, called with global `fetch` from `backend/src/services/email.js` (no SDK) |
 | Mobile | Expo SDK (latest stable), Expo Router, Redux Toolkit + RTK Query, react-native-reanimated, react-native-maps, expo-location, expo-image-picker, expo-image-manipulator, expo-secure-store |
-| Quality | ESLint (flat config, `defineConfig`) + Prettier (`endOfLine: "lf"`), knip, Vitest + Supertest |
+| Quality | ESLint (flat config, `defineConfig`) + Prettier (`endOfLine: "lf"`), knip, Vitest + Supertest. Mobile code also uses `eslint-config-expo` through `@eslint/compat` (see `mobile/CLAUDE.md` §8). Lint fails on warnings (`--max-warnings 0`). |
 | TypeScript | 6.0.x in `shared` — **not 7.x** until `typescript-eslint` supports it (its peer range stops below 6.1) |
 
 Verify exact versions with `npm view <pkg> version` — never rely on memory for versions.
@@ -365,6 +365,6 @@ Before reporting a task complete, confirm every item that applies:
 |---|---|---|
 | D1 | Retention of orders and prescription images | **Decided (for now):** keep everything, including after account deletion. No retention or image-deletion job. Revisit when storage runs low. |
 | D2 | Support email; where the account-deletion page, terms and privacy policy are hosted | **Open** — ask when building account deletion, onboarding consent, or the Play listing |
-| D3 | App names, Android package prefix, email sender name and address | **Partly decided:** app name is **MedStore** for now (will change later). Package prefix and email sender are **open** — ask when scaffolding an app or building `services/email.js` |
+| D3 | App names, Android package prefix, email sender name and address | **Partly decided:** app name is **MedStore** for now (will change later). Package prefix is **`com.medico`**: `com.medico.medstore` (customer) and `com.medico.medstore.admin` (admin), also used as the iOS bundle identifiers — permanent once published. Email sender is **open** — ask when building `services/email.js` |
 | D4 | Hosting provider for the backend | **Decided:** Render, one web service instance. Plan (free vs paid instance) and region are **open** — ask before the first deployment. |
 | D5 | Staff reviewing prescriptions meet the drug-licence requirements | **Confirmed** by the client. The app still records who reviewed each order. |

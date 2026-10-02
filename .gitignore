@@ -13,3 +13,18 @@ coverage/
 .claude/skills/
 .claude/agents/
 .impeccable/
+
+# Expo / React Native
+expo-env.d.ts
+.metro-health-check*
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+*.tsbuildinfo
+mobile/*/android/
+mobile/*/ios/

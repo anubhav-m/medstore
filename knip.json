@@ -8,6 +8,19 @@
     },
     "backend": {
       "project": ["src/**/*.js", "scripts/**/*.js", "test/**/*.js"]
+    },
+    "mobile/core": {
+      "project": ["src/**/*.ts"]
+    },
+    "mobile/customer": {
+      "entry": ["src/config/env.ts"],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignoreDependencies": ["expo-updates"]
+    },
+    "mobile/admin": {
+      "entry": ["src/config/env.ts"],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignoreDependencies": ["expo-updates"]
     }
   }
 }

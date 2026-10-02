@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": [
     "shared",
-    "backend"
+    "backend",
+    "mobile/*"
   ],
   "engines": {
     "node": "^22.14.0"
@@ -13,14 +14,16 @@
     "postinstall": "npm run build:shared",
     "build:shared": "npm run build -w @medstore/shared",
     "dev:shared": "npm run dev -w @medstore/shared",
-    "lint": "eslint . && prettier --check .",
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "knip": "knip",
     "test": "npm test --workspaces --if-present"
   },
   "devDependencies": {
+    "@eslint/compat": "2.1.1",
     "@eslint/js": "10.0.1",
     "eslint": "10.11.0",
+    "eslint-config-expo": "57.0.2",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.12.0",
     "knip": "6.39.0",

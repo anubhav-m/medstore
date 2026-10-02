@@ -11,7 +11,7 @@ mobile/
 │       ├── ui/               # Button, Input, Text, Screen, Card, Loader, ErrorState, EmptyState,
 │       │                     # StatusBadge, ImageViewer, ConfirmDialog
 │       ├── theme/            # colors, spacing, typography, radii
-│       ├── api/              # createBaseQuery: auth header, single-flight refresh, error normalisation
+│       ├── api/              # parseApiUrl; createBaseQuery: auth header, single-flight refresh, error normalisation
 │       ├── auth/             # SecureStore token storage
 │       ├── errors/           # error-messages.ts (code → user text), getErrorMessage.ts
 │       ├── format/           # formatCurrency (paise → ₹), formatDateTime (IST), formatPhone
@@ -50,9 +50,13 @@ features/orders/
 - Expo's default Metro config handles npm workspaces. Don't add custom `watchFolders` or resolver config unless `expo-doctor` or a build error requires it.
 - Route files in `src/app` contain no logic: they import a screen and export it. Nothing except routes lives in `src/app`.
 - Import with the `@/` alias inside an app and by package name across packages — never deep relative paths (`../../../`).
-- Each app has its own `app.config.ts` with a distinct name, slug, scheme, icon and Android package. Names for now: **MedStore** and **MedStore Admin** (they will change). The package prefix is an open decision (root D3) — ask before scaffolding an app.
+- Each app has its own `app.config.ts` with a distinct name, slug, scheme, icon and Android package. Names for now: **MedStore** and **MedStore Admin** (they will change). Packages (root D3): `com.medico.medstore` and `com.medico.medstore.admin`, also the iOS bundle identifiers. They can never change once published.
+- **Android first, iOS later.** Both apps keep the iOS platform enabled so it can be added without rework, but only Android is built and tested for now. Don't add Android-only config that would block iOS, and don't spend effort on iOS until asked.
+- `src/config/env.ts` is imported once in the root layout so a missing or malformed `EXPO_PUBLIC_API_URL` fails at startup. Until the API client imports it, `knip.json` lists it as an entry; remove that entry in the change that first imports `env`.
 
 ## 2. Components & UI
+
+- Design decisions (colours, type, spacing, components, tone) follow `PRODUCT.md` and `DESIGN.md` from Impeccable. The technical rules in this file win whenever Impeccable suggests something web-only (CSS, CSS variables, media queries, hover, cursor, viewport units).
 
 - **Everything is a modular component.** Screens compose; components present; hooks hold logic. Components stay under ~150 lines.
 - **One component per purpose, with variants.** One `Button` with a `variant` prop — never `MyButton`, `PrimaryButton`, `CustomButton`.
@@ -130,6 +134,15 @@ Users never see raw errors, status codes, stack traces or developer messages.
 - Before adding a package, check it supports this Expo SDK. If it needs native code (a development build), say so before adding it.
 - Expo Router is the **only** navigation system. Enable typed routes and type all route params. Guard route groups in layouts using auth state and `onboardingCompleted` (customer) / `mustChangePassword` (admin).
 - Run `npx expo-doctor` in each app after dependency changes.
+- **SDK-pinned peers.** `expo-router` pulls in packages that require `react-dom`, `react-native-reanimated`, `react-native-gesture-handler` and `react-native-worklets`. Left undeclared, npm installs their newest versions, which don't match the SDK (and Expo Go's native code). Each app therefore declares them at the SDK's versions (`npx expo install`) even though no app code imports them yet. Keep them, and after an SDK upgrade check that `npm ls` shows one copy of each.
+- **Linting.** The root `eslint.config.js` applies `eslint-config-expo` (flat) to `mobile/**`, then re-applies the repo rules, which are stricter. Its `react` and `import` plugins only support ESLint 9, so they are wrapped with `fixupPluginRules` from `@eslint/compat`. `@typescript-eslint` must not be wrapped, or it clashes with the root TypeScript block. The `import/*` rules that resolve paths are off because `eslint-plugin-import` 2.x can't load its resolver on ESLint 10 (`tsc` catches unresolved imports). Core `no-duplicate-imports` replaces `import/no-duplicates`. Revisit when `eslint-config-expo` supports ESLint 10.
+- `knip.json` ignores `expo-updates` in both apps: knip's Expo plugin assumes every app uses over-the-air updates, but we don't.
+- **Accepted `npm audit` findings (2026-10-02, Expo SDK 57)**, all inside Expo's own dependencies, with no fix that keeps SDK 57. Never run `npm audit fix --force`: it downgrades Expo to SDK 44.
+  - `node-forge` (high): signature-verification flaw. Only Expo's CLI uses it, for signing over-the-air updates (unused). Not in the app. Every release up to the latest (1.4.0) is affected.
+  - `decode-uri-component` (moderate, via `expo-router` → `query-string`): a crafted link can freeze the app on that phone. In the app, but no data exposure.
+  - `uuid` (moderate, via `@expo/config-plugins` → `xcode`): build-time iOS tooling only, in a code path we never call.
+  - Re-check after every Expo SDK upgrade. Any **new** high or critical finding still needs fixing, replacing or asking.
+- No custom `metro.config.js`: Expo's default config resolves the workspaces, confirmed by `npx expo export` bundling `@medstore/mobile-core` source.
 
 ## 9. Customer app
 
