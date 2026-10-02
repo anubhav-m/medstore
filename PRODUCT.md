@@ -54,4 +54,4 @@ No customer count, testimonials, ratings or store photos exist yet. Never invent
 5. **Plain, calm, local.** Customer-facing copy is simple English, as clear as talking to a friendly shopkeeper.
 
 ## Accessibility & Inclusion
-English only in v1. Touch targets of at least 48×48 dp with 8 dp spacing, `accessibilityLabel`/`accessibilityRole` on every interactive element. Text stays readable and layouts don't break at the largest system font size, on small screens. Prices in ₹ are large and clear enough to read and compare at a glance. Errors are always shown in plain language, never as codes.
+English only in v1. Hindi is planned, so fonts must already cover Devanagari. Touch targets of at least 48×48 dp with 8 dp spacing, `accessibilityLabel`/`accessibilityRole` on every interactive element. Text stays readable and layouts don't break at the largest system font size, on small screens. Prices in ₹ are large and clear enough to read and compare at a glance. Errors are always shown in plain language, never as codes.
