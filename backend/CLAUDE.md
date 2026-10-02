@@ -450,7 +450,8 @@ Each job is an exported function taking `now`, so tests call it directly. `serve
 
 ## 12. Testing
 
-- Vitest + Supertest + `mongodb-memory-server` (replica-set mode). The first run downloads a `mongod` binary (slow on Windows with antivirus) — `hookTimeout` is 120 s.
+- Vitest + Supertest + `mongodb-memory-server` (replica-set mode). The first run downloads a `mongod` binary (slow on Windows with antivirus) — `hookTimeout` is 120 s. `testTimeout` is 30 s: slow tests take ~4 s when healthy, too close to the 5 s default under load.
+- The test mongod runs with its **TTL monitor disabled** (`globalSetup.js`). It deletes by the real clock, while tests freeze `Date` (often in the past), so it removed OTP codes mid-test (`verify-email` → `INVALID_OR_EXPIRED_CODE`). Expiry is always checked in code, so tests never rely on TTL deletion.
 - `test/globalSetup.js` starts one memory replica set and shares its URI via `provide("mongoUri")`. `test/setup.js` connects each worker to its own database (`test-${VITEST_POOL_ID}`) and empties every collection `beforeEach`, so tests are repeatable and order-independent.
 - Test env values live in `vitest.config.js` `test.env` (`LOG_LEVEL=silent`, a placeholder `MONGODB_URI` that is never connected to).
 - Build apps with `createApp({ rateLimits })` to use low limits in tests; mock a module with `vi.mock` (e.g. `config/db.js`) rather than reaching into library internals.

@@ -26,5 +26,8 @@ export default defineConfig({
     mockReset: true,
     // The first run downloads a mongod binary, which is slow on Windows.
     hookTimeout: 120_000,
+    // Healthy runs take up to ~4 s per test (argon2 + transactions across parallel workers), too
+    // close to the 5 s default: under load, tests failed by timeout alone.
+    testTimeout: 30_000,
   },
 });
