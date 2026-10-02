@@ -13,7 +13,8 @@
     "admin:enable": "node --env-file=.env scripts/admin-enable.js",
     "admin:set-stores": "node --env-file=.env scripts/admin-set-stores.js",
     "admin:list": "node --env-file=.env scripts/admin-list.js",
-    "storage:setup": "node --env-file=.env scripts/storage-setup.js"
+    "storage:setup": "node --env-file=.env scripts/storage-setup.js",
+    "seed:dev": "node --env-file=.env scripts/seed-dev.js"
   },
   "dependencies": {
     "@medstore/shared": "*",

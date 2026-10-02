@@ -10,7 +10,8 @@ Express + MongoDB API serving both apps. Plain JavaScript, ES modules. The root 
 ```text
 backend/
 ├── scripts/                  # CLI: admin-create.js, admin-reset-password.js, admin-disable.js,
-│                             # admin-enable.js, admin-set-stores.js, admin-list.js, storage-setup.js
+│                             # admin-enable.js, admin-set-stores.js, admin-list.js, storage-setup.js,
+│                             # seed-dev.js (development only)
 └── src/
     ├── app.js                # builds the Express app — no listen()
     ├── server.js             # connects DB, starts server + jobs, graceful shutdown
@@ -495,11 +496,14 @@ npm run admin:enable
 npm run admin:set-stores
 npm run admin:list
 npm run storage:setup         # create/update the private prescriptions bucket
+npm run seed:dev -- --lat <lat> --lng <lng>   # development only: stores DEV1–DEV5 around the pin
 ```
 
 From the repo root: `npm run dev -w backend`, `npm test -w backend`. Lint, knip and typecheck run from the root only.
 
 Run the admin scripts from PowerShell, Windows Terminal or the VS Code terminal (they need a TTY for the hidden password prompt).
+
+`seed:dev` (`scripts/seed-dev.js`, logic in `scripts/lib/seedDevStores.js`) refuses unless `NODE_ENV` is `development`. It creates or resets, by code, five test stores around the given pin (copy it from Google Maps), each parsed with `createStoreSchema` and written with `createStore` / `updateStore`, so every store rule applies: DEV1 always open (1 km N, 10 km radius), DEV2 10:00–22:00 (2 km E, 5 km), DEV3 03:00–03:30 (2 km S, 5 km), DEV4 paused (1.5 km W, 10 km), DEV5 out of range (3 km NE, 0.5 km radius). "Always open" is 00:00–23:59, since 24-hour stores aren't supported (root 3.3). It touches no other collection, deletes nothing and needs no TTY. Assign the codes to test staff with `admin:create` / `admin:set-stores`.
 
 ## 15. Deployment (Render)
 
